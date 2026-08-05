@@ -1,0 +1,31 @@
+{
+  "name": "vr-platform-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WebXR Sketchfab + Meta Horizon + Unity Cloud Build Hybrid Platform",
+  "scripts": {
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "build:backend": "cd backend && npm run build",
+    "build:frontend": "cd frontend && npm run build",
+    "build": "npm run build:backend && npm run build:frontend",
+    "test": "cd backend && npm test",
+    "prisma:generate": "cd backend && npx prisma generate",
+    "prisma:migrate": "cd backend && npx prisma migrate dev",
+    "prisma:seed": "cd backend && npx prisma db seed",
+    "docker:up": "docker-compose -f docker/docker-compose.yml up -d",
+    "docker:down": "docker-compose -f docker/docker-compose.yml down"
+  },
+  "keywords": [
+    "webxr",
+    "threejs",
+    "unity-webgl",
+    "react-three-fiber",
+    "nextjs",
+    "express",
+    "prisma",
+    "sketchfab"
+  ],
+  "author": "VR Platform Architects",
+  "license": "MIT"
+}
