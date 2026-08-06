@@ -46,8 +46,6 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
       wasmUrl: urls.wasm,
     });
 
-    let progressTimer: NodeJS.Timeout | null = null;
-
     loadUnityInstance(canvasRef.current, {
       loaderUrl: loaderUrl,
       frameworkUrl: urls.framework || '',
@@ -56,12 +54,6 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
       onProgress: (p) => {
         const pct = Math.round(p * 100);
         setProgress(pct);
-        if (pct >= 90 && !progressTimer) {
-          progressTimer = setTimeout(() => {
-            setProgress(100);
-            setLoading(false);
-          }, 1000);
-        }
       },
     })
       .then((instance) => {
@@ -71,15 +63,11 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
         setLoading(false);
       })
       .catch((err) => {
-        const errorMsg = err?.message || 'Failed to stream Unity WebGL build files.';
-        console.error('[UnityViewer ERROR]:', err);
+        const errorMsg = typeof err === 'string' ? err : err?.message || JSON.stringify(err) || 'Failed to stream Unity WebGL build files.';
+        console.error('[UnityViewer DEBUG ERROR]:', err);
         setLoadError(errorMsg);
         setLoading(false);
       });
-
-    return () => {
-      if (progressTimer) clearTimeout(progressTimer);
-    };
   }, [urls]);
 
   const handleStartPlay = () => {
