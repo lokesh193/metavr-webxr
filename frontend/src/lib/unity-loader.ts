@@ -3,6 +3,7 @@ export interface UnityConfig {
   frameworkUrl: string;
   dataUrl: string;
   wasmUrl: string;
+  indexUrl?: string;
   onProgress?: (progress: number) => void;
 }
 
@@ -10,23 +11,27 @@ export function loadUnityInstance(
   canvas: HTMLCanvasElement,
   config: UnityConfig
 ): Promise<any> {
-  return new Promise((resolve, reject) => {
-    console.log('[Unity Stage 1] Loader URL resolved:', config.loaderUrl);
-    console.log('[Unity Stage 2] Framework URL resolved:', config.frameworkUrl);
-    console.log('[Unity Stage 3] Data URL resolved:', config.dataUrl);
-    console.log('[Unity Stage 4] WASM URL resolved:', config.wasmUrl);
+  return new Promise(async (resolve, reject) => {
+    console.log('[Unity Stage 1] loaderUrl resolved:', config.loaderUrl);
+    console.log('[Unity Stage 2] frameworkUrl resolved:', config.frameworkUrl);
+    console.log('[Unity Stage 3] dataUrl resolved:', config.dataUrl);
+    console.log('[Unity Stage 4] wasmUrl resolved:', config.wasmUrl);
 
-    if (!config.loaderUrl) {
-      console.error('[Unity Stage Error] Missing loaderUrl in configuration');
-      return reject(new Error('Unity loader.js script URL is missing'));
+    if (!config.loaderUrl && !config.indexUrl) {
+      const err = new Error('Unity loader URL missing');
+      console.error('[Unity Stage Error]', err);
+      return reject(err);
     }
 
-    // Reuse existing loader script if present
-    let script = document.querySelector(`script[src="${config.loaderUrl}"]`) as HTMLScriptElement;
+    // Stage 1: Load and execute loader.js script tag dynamically
+    const targetLoaderUrl = config.loaderUrl || config.indexUrl!;
 
-    const initialize = () => {
-      console.log('[Unity Stage 5] createUnityInstance started');
-      if ((window as any).createUnityInstance) {
+    const executeCreateInstance = () => {
+      console.log('[Unity Stage 3] createUnityInstance called');
+      if (typeof (window as any).createUnityInstance === 'function') {
+        console.log('[Unity Stage 4] wasm request started:', config.wasmUrl);
+        console.log('[Unity Stage 5] data request started:', config.dataUrl);
+
         (window as any)
           .createUnityInstance(
             canvas,
@@ -54,36 +59,38 @@ export function loadUnityInstance(
               if (config.onProgress) config.onProgress(progress);
             }
           )
-          .then((unityInstance: any) => {
-            console.log('[Unity Stage 6] createUnityInstance resolved successfully');
-            console.log('[Unity Stage 7] Unity WebGL runtime 100% initialized and rendering');
-            (window as any).unityInstance = unityInstance;
-            resolve(unityInstance);
+          .then((instance: any) => {
+            console.log('[Unity Stage 6] Unity initialized');
+            (window as any).unityInstance = instance;
+            resolve(instance);
           })
           .catch((err: any) => {
-            console.error('[Unity Stage Error] createUnityInstance failed:', err);
+            console.error('[Unity Stage Error] createUnityInstance rejected:', err);
             reject(err);
           });
       } else {
-        const err = new Error('createUnityInstance function not found on window object');
+        const err = new Error('createUnityInstance is not defined on window');
         console.error('[Unity Stage Error]', err);
         reject(err);
       }
     };
 
-    if (script) {
-      console.log('[Unity Stage 1.1] Reusing existing loader script element');
-      initialize();
+    // Check if loader script is already injected into DOM
+    let existingScript = document.querySelector(`script[src="${targetLoaderUrl}"]`) as HTMLScriptElement;
+    if (existingScript) {
+      console.log('[Unity Stage 2] loader.js loaded (reusing existing script element)');
+      executeCreateInstance();
     } else {
-      console.log('[Unity Stage 1.2] Injecting script tag for loader.js');
-      script = document.createElement('script');
-      script.src = config.loaderUrl;
+      console.log('[Unity Stage 2] loader.js loading via dynamically created <script> tag...');
+      const script = document.createElement('script');
+      script.src = targetLoaderUrl;
+      script.async = true;
       script.onload = () => {
-        console.log('[Unity Stage 1.3] loader.js script loaded successfully');
-        initialize();
+        console.log('[Unity Stage 2] loader.js loaded successfully');
+        executeCreateInstance();
       };
       script.onerror = (e) => {
-        const err = new Error(`Failed to load Unity loader script from ${config.loaderUrl}`);
+        const err = new Error(`Failed to load loader script from ${targetLoaderUrl}`);
         console.error('[Unity Stage Error]', err, e);
         reject(err);
       };
