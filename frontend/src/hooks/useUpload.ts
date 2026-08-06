@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { apiClient } from '@/lib/api-client';
+import { supabase } from '@/lib/supabase-client';
 import { toast } from 'sonner';
 
 export function useUpload() {
@@ -10,7 +11,7 @@ export function useUpload() {
     setIsUploading(true);
     setProgress(0);
     try {
-      // Auto-authenticate as guest demo user if no token is currently stored
+      // 1. Try primary Express backend API route
       let token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
       if (!token) {
         try {
@@ -39,30 +40,62 @@ export function useUpload() {
         headers['Authorization'] = `Bearer ${token}`;
       }
 
-      const { data } = await apiClient.post('/upload', formData, {
-        headers,
-        onUploadProgress: (event) => {
-          if (event.total) {
-            const percent = Math.round((event.loaded * 100) / event.total);
-            setProgress(percent);
-          }
-        },
-      });
+      try {
+        const { data } = await apiClient.post('/upload', formData, {
+          headers,
+          onUploadProgress: (event) => {
+            if (event.total) {
+              const percent = Math.round((event.loaded * 100) / event.total);
+              setProgress(percent);
+            }
+          },
+        });
 
-      toast.success('Asset uploaded and processed successfully!');
-      return data;
+        toast.success('Asset uploaded and processed successfully!');
+        return data;
+      } catch (backendError: any) {
+        console.warn('[useUpload] Primary API route failed, attempting Direct Supabase Cloud Storage upload...', backendError);
+
+        // 2. Direct Supabase Cloud Storage Upload Fallback for Vercel production
+        const primaryFile = files[0];
+        if (!primaryFile) throw backendError;
+
+        const filePath = `uploads/${Date.now()}_${primaryFile.name}`;
+
+        // Ensure bucket exists or upload to default bucket
+        const { data: uploadData, error: uploadErr } = await supabase.storage
+          .from('webxr-assets')
+          .upload(filePath, primaryFile, {
+            upsert: true,
+            contentType: primaryFile.type || 'application/octet-stream',
+          });
+
+        if (uploadErr) {
+          throw new Error(`Cloud storage upload error: ${uploadErr.message}`);
+        }
+
+        const { data: urlData } = supabase.storage
+          .from('webxr-assets')
+          .getPublicUrl(filePath);
+
+        const isUnity = primaryFile.name.endsWith('.zip') || primaryFile.name.endsWith('.unitypackage');
+        const projectType = isUnity ? 'UNITY' : 'MODEL';
+
+        // Post metadata to database
+        const { data: projectData } = await apiClient.post('/projects', {
+          title: title || primaryFile.name.replace(/\.[^/.]+$/, ''),
+          description: description || 'Uploaded WebXR asset via Cloud Storage',
+          type: projectType,
+          glbUrl: isUnity ? null : urlData.publicUrl,
+          unityUrls: isUnity ? { indexUrl: urlData.publicUrl } : null,
+          thumbnail: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
+        });
+
+        toast.success('Uploaded to Supabase Cloud Storage successfully!');
+        return { projectId: projectData?.id || 'projects' };
+      }
     } catch (error: any) {
-      const isNetworkOrMixedContent =
-        !error.response ||
-        error.message?.includes('Network Error') ||
-        error.response?.status === 413 ||
-        error.response?.status === 500 ||
-        error.response?.status === 502;
-
-      const msg = isNetworkOrMixedContent
-        ? 'Please use http://localhost:3000/upload to upload full Unity WebGL builds up to 1GB!'
-        : error.response?.data?.error || 'Upload failed';
-
+      const msg = error.response?.data?.error || error.message || 'Upload failed';
       toast.error(msg);
       throw error;
     } finally {
