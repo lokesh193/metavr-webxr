@@ -6,8 +6,11 @@ function getApiBaseUrl() {
   }
   if (typeof window !== 'undefined') {
     const hostname = window.location.hostname;
+    // On Vercel production HTTPS deployment, route to the active HTTPS tunnel URL
+    if (hostname.includes('vercel.app')) {
+      return 'https://stupid-dingos-build.loca.lt/api';
+    }
     if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
-      // Automatically route API calls to the hosting laptop's IP address when accessed on network
       return `http://${hostname}:5000/api`;
     }
   }
@@ -23,13 +26,14 @@ export const apiClient = axios.create({
 
 apiClient.interceptors.request.use(
   (config) => {
-    // Dynamic Base URL check before sending request
     config.baseURL = getApiBaseUrl();
     if (typeof window !== 'undefined') {
       const token = localStorage.getItem('token');
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
+      // Add bypass header for localtunnel proxy page
+      config.headers['Bypass-Tunnel-Remainder'] = 'true';
     }
     return config;
   },
