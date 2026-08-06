@@ -34,10 +34,12 @@ export default function ProjectDetailPage() {
   const fetchProjectDetail = async () => {
     setLoading(true);
     try {
-      // Check client-extracted custom projects in sessionStorage first
+      // Check client-extracted custom projects in localStorage & sessionStorage first
       if (typeof window !== 'undefined') {
-        const stored = JSON.parse(sessionStorage.getItem('custom_projects') || '[]');
-        const found = stored.find((p: any) => p.id === projectId);
+        const storedLocal = JSON.parse(localStorage.getItem('custom_projects') || '[]');
+        const storedSession = JSON.parse(sessionStorage.getItem('custom_projects') || '[]');
+        const combined = [...storedLocal, ...storedSession];
+        const found = combined.find((p: any) => p.id === projectId);
         if (found) {
           setProject(found);
           setLoading(false);
@@ -100,9 +102,13 @@ export default function ProjectDetailPage() {
 
   const handleDeleteSuccess = () => {
     if (typeof window !== 'undefined') {
-      const stored = JSON.parse(sessionStorage.getItem('custom_projects') || '[]');
-      const filtered = stored.filter((p: any) => p.id !== projectId);
-      sessionStorage.setItem('custom_projects', JSON.stringify(filtered));
+      const storedLocal = JSON.parse(localStorage.getItem('custom_projects') || '[]');
+      const filteredLocal = storedLocal.filter((p: any) => p.id !== projectId);
+      localStorage.setItem('custom_projects', JSON.stringify(filteredLocal));
+
+      const storedSession = JSON.parse(sessionStorage.getItem('custom_projects') || '[]');
+      const filteredSession = storedSession.filter((p: any) => p.id !== projectId);
+      sessionStorage.setItem('custom_projects', JSON.stringify(filteredSession));
     }
     router.push('/projects');
   };
@@ -150,7 +156,7 @@ export default function ProjectDetailPage() {
       </div>
 
       {/* 3D / Unity Viewer Canvas Container */}
-      <div className="relative w-full h-[550px] bg-slate-950 rounded-3xl overflow-hidden border border-white/10 shadow-vr">
+      <div className="relative w-full min-h-[520px] bg-slate-950 rounded-3xl overflow-hidden border border-white/10 shadow-vr">
         {project.type === 'MODEL' && project.glbUrl ? (
           <>
             {/* Three.js Canvas */}

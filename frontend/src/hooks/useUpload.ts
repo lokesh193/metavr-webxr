@@ -15,7 +15,7 @@ export function useUpload() {
       const file = files[0];
       const ext = file.name.split('.').pop()?.toLowerCase();
 
-      // If file is a ZIP or larger than 4MB, extract directly on client side in memory
+      // Extract ZIP client-side in memory for WebGL execution
       if (ext === 'zip' || ext === 'unitypackage' || file.size > 4 * 1024 * 1024) {
         if (ext === 'zip' || ext === 'unitypackage') {
           toast.info('Extracting Unity WebGL WASM build directly in browser engine...');
@@ -40,10 +40,11 @@ export function useUpload() {
             },
           };
 
-          // Store in sessionStorage & global state for instant seamless viewing
+          // Store in localStorage & sessionStorage for persistent cross-tab viewing
           if (typeof window !== 'undefined') {
-            const existing = JSON.parse(sessionStorage.getItem('custom_projects') || '[]');
+            const existing = JSON.parse(localStorage.getItem('custom_projects') || sessionStorage.getItem('custom_projects') || '[]');
             existing.unshift(newProject);
+            localStorage.setItem('custom_projects', JSON.stringify(existing));
             sessionStorage.setItem('custom_projects', JSON.stringify(existing));
           }
 

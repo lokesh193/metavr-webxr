@@ -22,7 +22,6 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
   const [xrStatus, setXrStatus] = useState<DeviceXRMatrix | null>(null);
   const [unityInstance, setUnityInstance] = useState<any>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  // Default to iframe mode whenever creator's index.html exists!
   const [useIframeMode, setUseIframeMode] = useState<boolean>(!!urls?.indexUrl);
   const { setIsPresenting } = useVRStore();
 
@@ -33,8 +32,6 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
   useEffect(() => {
     if (useIframeMode) return;
     if (!canvasRef.current || !urls?.loader) return;
-
-    console.log('[UnityViewer] Initializing Unity WebGL runtime with URLs:', urls);
 
     let progressTimer: NodeJS.Timeout | null = null;
 
@@ -47,7 +44,6 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
         const pct = Math.round(p * 100);
         setProgress(pct);
         if (pct >= 90 && !progressTimer) {
-          // If WASM compilation finishes at 90%, smoothly transition to 100%
           progressTimer = setTimeout(() => {
             setProgress(100);
             setLoading(false);
@@ -56,21 +52,12 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
       },
     })
       .then((instance) => {
-        console.log('[UnityViewer] Unity Instance successfully initialized! (100% Loaded)');
         setUnityInstance(instance);
         setProgress(100);
         setLoading(false);
       })
       .catch((err) => {
-        const errorMsg = err?.message || 'Failed to stream Unity WebGL build files.';
-        console.error('[UnityViewer DEBUG ERROR]:', {
-          error: err,
-          loaderUrl: urls.loader,
-          frameworkUrl: urls.framework,
-          dataUrl: urls.data,
-          wasmUrl: urls.wasm,
-        });
-        setLoadError(errorMsg);
+        setLoadError(err?.message || 'Failed to load Unity WebGL files');
         setLoading(false);
       });
 
@@ -123,13 +110,12 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
     }
   };
 
-  // Option 1: Serve Creator's exact index.html if uploaded with index.html
   if (useIframeMode && urls?.indexUrl) {
     return (
-      <div ref={containerRef} className="relative w-full h-full min-h-[580px] bg-slate-950 rounded-2xl overflow-hidden border border-border/60 shadow-vr">
+      <div ref={containerRef} className="relative w-full h-full min-h-[500px] bg-slate-950 rounded-2xl overflow-hidden border border-border/60 shadow-vr">
         <iframe
           src={urls.indexUrl}
-          className="w-full h-full min-h-[580px] border-0"
+          className="w-full h-full min-h-[500px] border-0"
           allow="autoplay; fullscreen; vr; xr-spatial-tracking"
           title={projectTitle || 'Unity WebGL Build'}
         />
@@ -137,15 +123,13 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
     );
   }
 
-  // Option 2: Execute createUnityInstance directly on canvas
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full min-h-[540px] bg-slate-950 rounded-2xl overflow-hidden border border-border/60 flex items-center justify-center group shadow-vr"
+      className="relative w-full h-full min-h-[500px] bg-slate-950 rounded-2xl overflow-hidden border border-border/60 flex items-center justify-center group shadow-vr"
     >
       <canvas ref={canvasRef} className="w-full h-full object-cover" tabIndex={0} />
 
-      {/* GPU WASM Streaming Loading Screen */}
       {loading && !loadError && (
         <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-md flex flex-col items-center justify-center p-8 z-30 space-y-4">
           <div className="w-16 h-16 rounded-2xl bg-primary/20 border border-primary/40 flex items-center justify-center animate-bounce text-primary">
@@ -165,7 +149,6 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
         </div>
       )}
 
-      {/* Load Error Report */}
       {loadError && (
         <div className="absolute inset-0 bg-slate-950/95 flex flex-col items-center justify-center p-8 text-center z-30 space-y-3">
           <AlertCircle className="w-12 h-12 text-red-400 animate-pulse mx-auto" />
@@ -176,7 +159,6 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
         </div>
       )}
 
-      {/* Action Overlay Panel: ▶ Play & 🥽 Enter VR Mode */}
       {!loading && !isPlaying && !loadError && (
         <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-md flex flex-col items-center justify-center gap-5 z-20 p-6">
           <div className="text-center space-y-2">
@@ -217,19 +199,6 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
               </span>
             )}
           </div>
-        </div>
-      )}
-
-      {/* Control Bar in Play Mode */}
-      {isPlaying && (
-        <div className="absolute top-4 right-4 z-20 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center gap-2">
-          <button
-            onClick={handleToggleFullscreen}
-            className="p-2.5 bg-slate-900/80 hover:bg-slate-800 backdrop-blur-md text-white rounded-xl border border-white/10 shadow-lg"
-            title="Fullscreen Mode"
-          >
-            <Maximize2 className="w-5 h-5" />
-          </button>
         </div>
       )}
     </div>
