@@ -122,7 +122,7 @@ export async function extractAndUploadUnityZip(
           fileData = new Uint8Array(decompressed);
           targetPath = targetPath.slice(0, -3); // Strip .br extension (e.g. MyVRWebBuild.wasm.br -> MyVRWebBuild.wasm)
           lowerPath = targetPath.toLowerCase();
-          console.log(`[Upload Stage Decompress Success] ${targetPath} (${fileData.byteLength} bytes, Magic Header: ${fileData[0].toString(16)} ${fileData[1].toString(16)} ${fileData[2].toString(16)} ${fileData[3].toString(16)})`);
+          console.log(`[Upload Stage Decompress Success] ${targetPath} (${fileData.byteLength} bytes)`);
         } catch (brErr: any) {
           console.warn(`[Upload Stage Exception] Brotli decompression fallback notice for ${targetPath}:`, brErr);
         }
@@ -166,17 +166,19 @@ export async function extractAndUploadUnityZip(
     try {
       const publicUrl = await uploadToSupabaseDirect(cleanPath, fileBlob, mimeType);
 
-      if (lowerPath.endsWith('.loader.js')) {
+      // Match URLs using robust path substring matching
+      const pathLower = cleanPath.toLowerCase();
+      if (pathLower.endsWith('.loader.js')) {
         unityUrls.loader = publicUrl;
-      } else if (lowerPath.includes('framework.js')) {
+      } else if (pathLower.includes('framework.js')) {
         unityUrls.framework = publicUrl;
-      } else if (lowerPath.includes('.data')) {
+      } else if (pathLower.includes('.data')) {
         unityUrls.data = publicUrl;
-      } else if (lowerPath.includes('.wasm')) {
+      } else if (pathLower.includes('.wasm')) {
         unityUrls.wasm = publicUrl;
-      } else if (lowerPath.endsWith('index.html')) {
+      } else if (pathLower.endsWith('index.html')) {
         unityUrls.indexUrl = publicUrl;
-      } else if (lowerPath.endsWith('.glb') && !firstGlbUrl) {
+      } else if (pathLower.endsWith('.glb') && !firstGlbUrl) {
         firstGlbUrl = publicUrl;
       }
     } catch (upEx: any) {
@@ -193,5 +195,10 @@ export async function extractAndUploadUnityZip(
   await Promise.all(uploadTasks);
 
   console.log('[Upload Stage 8] All parallel asset uploads completed. Final Unity URLs:', unityUrls);
+
+  if (!unityUrls.loader || !unityUrls.wasm) {
+    console.warn('[unity-zipper] Notice: Missing loader or WASM URL after extraction:', unityUrls);
+  }
+
   return { unityUrls, firstGlbUrl };
 }
