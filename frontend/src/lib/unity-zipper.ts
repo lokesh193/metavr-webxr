@@ -27,7 +27,7 @@ async function getBrotli() {
   return brotliInstance;
 }
 
-// Direct REST uploader without short timeouts (supports large 15-50MB binary files over slow networks)
+// Ultra-fast direct REST uploader to Supabase Storage with Cache-Control support
 async function uploadToSupabaseDirect(
   cleanPath: string,
   blob: Blob,
@@ -116,6 +116,7 @@ export async function extractAndUploadUnityZip(
   let firstGlbUrl: string | undefined = undefined;
 
   const processedPayloads: Array<{ cleanPath: string; blob: Blob; mimeType: string; rawPath: string }> = [];
+  const MAX_UNCOMPRESSED_LIMIT = 45 * 1024 * 1024; // 45MB threshold to prevent HTTP 413 EntityTooLarge errors
 
   for (const rawPath of fileKeys) {
     const zipEntry = zipContent.files[rawPath];
@@ -130,15 +131,19 @@ export async function extractAndUploadUnityZip(
     let targetPath = rawPath;
     let lowerPath = targetPath.toLowerCase();
 
-    // 100% Decompress Brotli (.br) files to uncompressed bytes (strips .br extension)
+    // Smart Compression Handling: Decompress Brotli (.br) files if uncompressed size <= 45MB
     if (lowerPath.endsWith('.br')) {
       if (brotli) {
         try {
           const decompressed = brotli.decompress(fileData);
-          fileData = new Uint8Array(decompressed);
-          targetPath = targetPath.slice(0, -3);
-          lowerPath = targetPath.toLowerCase();
-          console.log(`[Brotli Decompressed] ${targetPath} (${fileData.byteLength} bytes)`);
+          if (decompressed.byteLength <= MAX_UNCOMPRESSED_LIMIT) {
+            fileData = new Uint8Array(decompressed);
+            targetPath = targetPath.slice(0, -3); // Strip .br extension
+            lowerPath = targetPath.toLowerCase();
+            console.log(`[Brotli Decompressed] ${targetPath} (${fileData.byteLength} bytes)`);
+          } else {
+            console.log(`[Smart Payload Protection] ${targetPath} decompressed size (${decompressed.byteLength} bytes) > 45MB cloud limit. Preserving compressed asset (${fileData.byteLength} bytes).`);
+          }
         } catch (brErr: any) {
           console.warn(`[Brotli Warning] Decompression notice for ${targetPath}:`, brErr);
         }
@@ -211,7 +216,6 @@ export async function extractAndUploadUnityZip(
     }
   });
 
-  // Await upload tasks naturally to completion without 10s timeouts
   await Promise.all(uploadTasks);
   console.timeEnd('5. Upload completed');
 
