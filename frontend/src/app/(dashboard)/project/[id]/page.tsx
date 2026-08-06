@@ -11,7 +11,7 @@ import { VRButton } from '@/components/webxr/VRButton';
 import { ModelViewer } from '@/components/viewer/ModelViewer';
 import { UnityViewer } from '@/components/viewer/UnityViewer';
 import { ProjectCardMenu } from '@/components/ui/ProjectCardMenu';
-import { Heart, Eye, MessageSquare, Send, RotateCw, Layers, ArrowLeft } from 'lucide-react';
+import { Heart, Eye, MessageSquare, Send, RotateCw, Layers, ArrowLeft, UploadCloud } from 'lucide-react';
 import { toast } from 'sonner';
 
 const SUPABASE_URL = 'https://sswulpqcabktapawrkpu.supabase.co';
@@ -80,7 +80,6 @@ export default function ProjectDetailPage() {
         ) {
           console.log('[ProjectDetailPage] Auto-discovering nested Unity URLs from Storage bucket for:', projectId);
           const allFilePaths = await listAllStorageFiles(`projects/${projectId}`);
-          console.log('[ProjectDetailPage] Found file paths in storage:', allFilePaths);
 
           if (allFilePaths.length > 0) {
             const reconstructed: any = {};
@@ -96,7 +95,7 @@ export default function ProjectDetailPage() {
             unityUrls = reconstructed;
 
             // Persist reconstructed URLs back to DB for instant future loads
-            if (unityUrls.loader) {
+            if (unityUrls && unityUrls.loader) {
               await supabase
                 .from('Project')
                 .update({ unityUrls: JSON.stringify(unityUrls) })
@@ -254,11 +253,21 @@ export default function ProjectDetailPage() {
               </button>
             </div>
           </>
-        ) : project.type === 'UNITY' && project.unityUrls ? (
+        ) : project.type === 'UNITY' && project.unityUrls && project.unityUrls.loader ? (
           <UnityViewer urls={project.unityUrls} projectTitle={project.title} />
         ) : (
-          <div className="w-full h-full flex items-center justify-center text-slate-400">
-            3D Preview binary processing...
+          <div className="w-full h-full flex flex-col items-center justify-center text-center p-8 space-y-4 bg-slate-950">
+            <UploadCloud className="w-12 h-12 text-cyan-400 animate-bounce" />
+            <h3 className="text-xl font-bold text-white">Incomplete Legacy Project Build</h3>
+            <p className="text-xs text-slate-400 max-w-md">
+              This legacy test record was created during an earlier test upload before the WebGL WASM pipeline completed. Please upload a fresh Unity build.
+            </p>
+            <Link
+              href="/upload"
+              className="px-6 py-3 bg-primary hover:bg-primary-glow text-white text-xs font-extrabold rounded-xl shadow-vr transition"
+            >
+              Upload Fresh Unity WebGL Build
+            </Link>
           </div>
         )}
       </div>
