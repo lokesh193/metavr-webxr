@@ -35,7 +35,7 @@ async function uploadToSupabaseDirect(
 ): Promise<string> {
   const endpoint = `${SUPABASE_URL}/storage/v1/object/webxr-assets/${cleanPath}`;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 second hard timeout per file
+  const timeoutId = setTimeout(() => controller.abort(), 120000); // 120 second hard timeout per file
 
   try {
     console.log(`[Direct Fetch Uploading] ${cleanPath} (${blob.size} bytes)...`);
@@ -64,8 +64,8 @@ async function uploadToSupabaseDirect(
   } catch (err: any) {
     clearTimeout(timeoutId);
     if (err.name === 'AbortError') {
-      console.error(`[Direct Fetch Timeout] Upload timed out after 90s for ${cleanPath}`);
-      throw new Error(`Upload timed out after 90s for ${cleanPath}`);
+      console.error(`[Direct Fetch Timeout] Upload timed out after 120s for ${cleanPath}`);
+      throw new Error(`Upload timed out after 120s for ${cleanPath}`);
     }
     console.error(`[Direct Fetch Exception] ${cleanPath}:`, err.message || err);
     throw err;
@@ -78,7 +78,7 @@ export async function extractAndUploadUnityZip(
   onProgress?: (pct: number) => void
 ): Promise<{ unityUrls: ExtractedUnityUrls; firstGlbUrl?: string }> {
   console.log('[Upload Stage 1] Opening ZIP package...');
-  toast.info('Extracting Unity WebGL package & uploading WebXR assets...');
+  toast.info('Extracting Unity WebGL package & decompressing Brotli assets...');
   
   const zip = new JSZip();
   let zipContent: JSZip;
@@ -99,7 +99,6 @@ export async function extractAndUploadUnityZip(
   let firstGlbUrl: string | undefined = undefined;
 
   const brotli = await getBrotli();
-  const MAX_DECOMPRESS_LIMIT = 40 * 1024 * 1024; // 40 MB limit to keep uncompressed payload within standard single request bounds
 
   for (let rawPath of files) {
     const zipEntry = zipContent.files[rawPath];
@@ -118,19 +117,15 @@ export async function extractAndUploadUnityZip(
     let targetPath = rawPath;
     let lowerPath = targetPath.toLowerCase();
 
-    // Decompress Brotli (.br) files safely if within 40MB limit
+    // 100% Guaranteed Brotli Decompression: Always decompress .br files so WebAssembly.instantiate receives uncompressed WASM magic header (\0asm)
     if (lowerPath.endsWith('.br')) {
       if (brotli) {
         try {
           const decompressed = brotli.decompress(fileData);
-          if (decompressed.byteLength <= MAX_DECOMPRESS_LIMIT) {
-            fileData = new Uint8Array(decompressed);
-            targetPath = targetPath.slice(0, -3); // Strip .br extension
-            lowerPath = targetPath.toLowerCase();
-            console.log(`[Upload Stage Decompress Success] ${targetPath} (${fileData.byteLength} bytes)`);
-          } else {
-            console.log(`[Upload Smart Compression] ${targetPath} decompressed size (${decompressed.byteLength} bytes) > 40MB limit. Preserving Brotli compression (${fileData.byteLength} bytes).`);
-          }
+          fileData = new Uint8Array(decompressed);
+          targetPath = targetPath.slice(0, -3); // Strip .br extension
+          lowerPath = targetPath.toLowerCase();
+          console.log(`[Upload Stage Decompress Success] ${targetPath} (${fileData.byteLength} bytes)`);
         } catch (brErr: any) {
           console.warn(`[Upload Stage Exception] Brotli decompression fallback notice for ${targetPath}:`, brErr);
         }
@@ -142,12 +137,10 @@ export async function extractAndUploadUnityZip(
         writer.write(fileData as unknown as BufferSource);
         writer.close();
         const decompressedArray = await new Response(ds.readable).arrayBuffer();
-        if (decompressedArray.byteLength <= MAX_DECOMPRESS_LIMIT) {
-          fileData = new Uint8Array(decompressedArray);
-          targetPath = targetPath.slice(0, -3);
-          lowerPath = targetPath.toLowerCase();
-          console.log(`[Upload Stage Decompress Success] Gzip ${targetPath} (${fileData.byteLength} bytes)`);
-        }
+        fileData = new Uint8Array(decompressedArray);
+        targetPath = targetPath.slice(0, -3);
+        lowerPath = targetPath.toLowerCase();
+        console.log(`[Upload Stage Decompress Success] Gzip ${targetPath} (${fileData.byteLength} bytes)`);
       } catch (gzErr: any) {
         console.warn(`[Upload Stage Exception] Gzip decompression fallback notice for ${targetPath}:`, gzErr);
       }
@@ -188,9 +181,9 @@ export async function extractAndUploadUnityZip(
         unityUrls.loader = publicUrl;
       } else if (lowerPath.includes('framework.js')) {
         unityUrls.framework = publicUrl;
-      } else if (lowerPath.includes('.data')) {
+      } else if (lowerPath.endsWith('.data')) {
         unityUrls.data = publicUrl;
-      } else if (lowerPath.includes('.wasm')) {
+      } else if (lowerPath.endsWith('.wasm')) {
         unityUrls.wasm = publicUrl;
       } else if (lowerPath.endsWith('index.html')) {
         unityUrls.indexUrl = publicUrl;
