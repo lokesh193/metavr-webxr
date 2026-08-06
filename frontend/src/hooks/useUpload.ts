@@ -6,6 +6,20 @@ import { toast } from 'sonner';
 
 const SUPABASE_URL = 'https://sswulpqcabktapawrkpu.supabase.co';
 
+// 10-second strict timeout helper
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operationName: string): Promise<T> {
+  let timer: any;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`Timeout error: ${operationName} exceeded ${timeoutMs / 1000}s limit.`));
+    }, timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    clearTimeout(timer);
+  });
+}
+
 export function useUpload() {
   const [progress, setProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
@@ -29,7 +43,7 @@ export function useUpload() {
       let primaryPublicUrl: string | null = null;
 
       if (isZip) {
-        // Extract ZIP build in browser and upload each extracted file (loader, framework, data, wasm) to Supabase Storage
+        // Stages 10% -> 80% executed in extractAndUploadUnityZip
         const { unityUrls, firstGlbUrl } = await extractAndUploadUnityZip(
           primaryFile,
           folderPrefix,
@@ -39,9 +53,9 @@ export function useUpload() {
         unityUrlsObj = unityUrls || {};
         if (firstGlbUrl) finalGlbUrl = firstGlbUrl;
 
-        // Auto-reconstruct missing WASM URL if missing from initial detection
+        // Guarantee all 4 required Unity URLs are present
         if (!unityUrlsObj.wasm) {
-          console.warn('[useUpload] WASM URL was missing from initial detection. Auto-populating WASM endpoint...');
+          console.warn('[useUpload] Auto-populating WASM URL...');
           unityUrlsObj.wasm = `${SUPABASE_URL}/storage/v1/object/public/webxr-assets/${folderPrefix}/Build/MyVRWebBuild.wasm`;
         }
         if (!unityUrlsObj.framework) {
@@ -54,27 +68,37 @@ export function useUpload() {
           unityUrlsObj.loader = `${SUPABASE_URL}/storage/v1/object/public/webxr-assets/${folderPrefix}/Build/MyVRWebBuild.loader.js`;
         }
       } else {
-        // Upload single 3D GLB model or asset file
+        setProgress(10);
+        console.log('[Stage 10%] Reading single 3D file...');
         toast.info('Uploading asset directly to Supabase Cloud Storage...');
+        
+        setProgress(80);
+        console.log('[Stage 80%] Uploading single 3D file...');
+        console.time('5. Upload completed');
+
         const cleanFileName = `${Date.now()}_${primaryFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
         const filePath = `${folderPrefix}/${cleanFileName}`;
 
-        console.log(`[Upload Stage 6] Queue upload for ${filePath}`);
-        console.log(`[Upload Stage 7] Uploading single asset file...`);
+        const uploadPromise = Promise.resolve(
+          supabase.storage
+            .from('webxr-assets')
+            .upload(filePath, primaryFile, {
+              upsert: true,
+              contentType: primaryFile.type || 'application/octet-stream',
+            })
+        );
 
-        const { data: uploadData, error: uploadErr } = await supabase.storage
-          .from('webxr-assets')
-          .upload(filePath, primaryFile, {
-            upsert: true,
-            contentType: primaryFile.type || 'application/octet-stream',
-          });
+        const { data: uploadData, error: uploadErr } = await withTimeout(
+          uploadPromise,
+          10000,
+          'Single File Upload'
+        );
+        console.timeEnd('5. Upload completed');
 
         if (uploadErr) {
-          console.error('[Upload Stage Exception] Single asset upload failed:', uploadErr.message);
+          console.error('[Upload Error] Single asset upload failed:', uploadErr.message);
           throw new Error(`Cloud storage upload error: ${uploadErr.message}`);
         }
-
-        console.log(`[Upload Stage 8] Upload complete for single asset ${filePath}`);
 
         const { data: urlData } = supabase.storage
           .from('webxr-assets')
@@ -82,8 +106,15 @@ export function useUpload() {
 
         primaryPublicUrl = urlData?.publicUrl || `${SUPABASE_URL}/storage/v1/object/public/webxr-assets/${filePath}`;
         finalGlbUrl = primaryPublicUrl;
-        setProgress(100);
       }
+
+      // Stage 6: Unity launch preparation started (60% / 89%)
+      console.log('6. Unity launch preparation started');
+
+      // Stage 7: Creating project (90%)
+      setProgress(90);
+      console.log('[Stage 90%] Creating project database record...');
+      console.time('7. Project creation completed');
 
       // Log metadata immediately before saving to Supabase
       console.log("Unity Metadata", unityUrlsObj);
@@ -92,11 +123,8 @@ export function useUpload() {
         ? JSON.stringify(unityUrlsObj)
         : null;
 
-      console.log('[Upload Stage 9] Creating Project DB row in Supabase...');
-
-      // Insert extracted project metadata into Supabase Project database table
-      try {
-        const { error: dbErr } = await supabase.from('Project').insert({
+      const dbInsertPromise = Promise.resolve(
+        supabase.from('Project').insert({
           id: projectId,
           title: title || primaryFile.name.replace(/\.[^/.]+$/, ''),
           description: description || 'Extracted Unity WebGL / WebXR Build',
@@ -106,12 +134,20 @@ export function useUpload() {
           unityUrls: stringifiedUnityUrls,
           thumbnail: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
           status: 'READY',
-        });
+        })
+      );
 
-        if (dbErr) {
-          console.warn('[Upload Stage Exception] Supabase Table insert notice:', dbErr.message);
-          // Fallback sync via API client route
-          await apiClient.post('/projects', {
+      const { error: dbErr } = await withTimeout(
+        dbInsertPromise,
+        10000,
+        'Project Record Database Insert'
+      );
+
+      if (dbErr) {
+        console.warn('[Database Warning] Primary insert notice:', dbErr.message);
+        // Fallback sync via API client route with strict 10s timeout
+        await withTimeout(
+          apiClient.post('/projects', {
             id: projectId,
             title: title || primaryFile.name.replace(/\.[^/.]+$/, ''),
             description: description || 'Extracted Unity WebGL / WebXR Build',
@@ -119,19 +155,23 @@ export function useUpload() {
             glbUrl: finalGlbUrl,
             unityUrls: unityUrlsObj,
             thumbnail: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
-          });
-        } else {
-          console.log('[Upload Stage 9] Project DB row created successfully with ID:', projectId);
-        }
-      } catch (syncErr: any) {
-        console.warn('[Upload Stage Exception] Database sync fallback notice:', syncErr?.message || syncErr);
+          }),
+          10000,
+          'Fallback API Project Creation'
+        );
       }
+      console.timeEnd('7. Project creation completed');
 
-      console.log('[Upload Stage 10] Redirecting to project page:', `/project/${projectId}`);
+      // Stage 8: Launching Unity (100%)
+      setProgress(100);
+      console.log('[Stage 100%] Launching Unity WebXR Asset...');
+      console.time('8. Redirect started');
+
       toast.success('Unity WebGL package extracted and launched for WebXR successfully!');
+      console.timeEnd('8. Redirect started');
       return { projectId, unityUrls: unityUrlsObj };
     } catch (error: any) {
-      console.error('[Upload Stage Exception] Fatal upload pipeline error:', error);
+      console.error('[Upload Exception] Fatal upload pipeline error:', error);
       const msg = error.message || 'Upload processing failed';
       toast.error(msg);
       throw error;
