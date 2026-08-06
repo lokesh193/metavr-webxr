@@ -5,7 +5,13 @@ function getApiBaseUrl() {
     return process.env.NEXT_PUBLIC_API_URL;
   }
   if (typeof window !== 'undefined') {
-    return '/api';
+    const hostname = window.location.hostname;
+    if (hostname.includes('vercel.app')) {
+      return 'https://rare-baths-live.loca.lt/api';
+    }
+    if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
+      return `http://${hostname}:5000/api`;
+    }
   }
   return 'http://localhost:5000/api';
 }
@@ -15,7 +21,7 @@ export const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 10000,
+  timeout: 60000,
 });
 
 apiClient.interceptors.request.use(
@@ -26,6 +32,7 @@ apiClient.interceptors.request.use(
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
+      config.headers['Bypass-Tunnel-Remainder'] = 'true';
     }
     return config;
   },
@@ -35,7 +42,6 @@ apiClient.interceptors.request.use(
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    // Graceful error fallback to prevent unhandled SSR crashes
     console.warn('[apiClient Warning]:', error?.message || error);
     return Promise.reject(error);
   }
