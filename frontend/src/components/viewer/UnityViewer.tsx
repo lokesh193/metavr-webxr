@@ -29,10 +29,13 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
   }, []);
 
   useEffect(() => {
+    // If indexUrl is available, serve creator's native index.html via iframe engine
+    if (urls?.indexUrl) return;
+
     if (!canvasRef.current) return;
     
     // Resolve loader, framework, data, and wasm URLs
-    const loaderUrl = urls?.loader || urls?.indexUrl;
+    const loaderUrl = urls?.loader;
     if (!loaderUrl) {
       setLoadError('Unity loader.js script URL is missing from project metadata.');
       setLoading(false);
@@ -114,6 +117,21 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
     }
   };
 
+  // Option 1: Serve Creator's exact index.html template if indexUrl is available
+  if (urls?.indexUrl) {
+    return (
+      <div ref={containerRef} className="relative w-full h-full min-h-[580px] bg-slate-950 rounded-2xl overflow-hidden border border-border/60 shadow-vr">
+        <iframe
+          src={urls.indexUrl}
+          className="w-full h-full min-h-[580px] border-0"
+          allow="autoplay; fullscreen; vr; xr-spatial-tracking"
+          title={projectTitle || 'Unity WebGL Build'}
+        />
+      </div>
+    );
+  }
+
+  // Option 2: Execute createUnityInstance directly on canvas
   return (
     <div
       ref={containerRef}
