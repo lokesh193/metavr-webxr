@@ -4,8 +4,11 @@ const getApiBaseUrl = () => {
   if (process.env.NEXT_PUBLIC_API_URL) {
     return process.env.NEXT_PUBLIC_API_URL;
   }
-  // Default to local Express backend server
-  return 'http://localhost:5000/api';
+  // Use relative '/api' route handlers in browser so Vercel & localhost work self-contained
+  if (typeof window !== 'undefined') {
+    return '/api';
+  }
+  return 'http://localhost:3000/api';
 };
 
 export const apiClient = axios.create({
@@ -13,7 +16,7 @@ export const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 120000, // 2 minutes timeout for large WebGL builds
+  timeout: 120000,
 });
 
 apiClient.interceptors.request.use(
