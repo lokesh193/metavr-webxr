@@ -34,13 +34,21 @@ export async function extractAndUploadUnityZip(
     const lowerPath = relativePath.toLowerCase();
 
     let mimeType = 'application/octet-stream';
-    if (lowerPath.endsWith('.js') || lowerPath.endsWith('.loader.js') || lowerPath.endsWith('.framework.js')) {
-      mimeType = 'text/javascript';
+    let contentEncoding: string | undefined = undefined;
+
+    if (lowerPath.endsWith('.br')) {
+      contentEncoding = 'br';
+    } else if (lowerPath.endsWith('.gz')) {
+      contentEncoding = 'gzip';
+    }
+
+    if (lowerPath.includes('.js') || lowerPath.endsWith('.loader.js') || lowerPath.endsWith('.framework.js')) {
+      mimeType = 'application/javascript';
     } else if (lowerPath.endsWith('.html')) {
       mimeType = 'text/html';
     } else if (lowerPath.endsWith('.css')) {
       mimeType = 'text/css';
-    } else if (lowerPath.endsWith('.wasm')) {
+    } else if (lowerPath.includes('.wasm')) {
       mimeType = 'application/wasm';
     } else if (lowerPath.endsWith('.png')) {
       mimeType = 'image/png';
@@ -52,12 +60,17 @@ export async function extractAndUploadUnityZip(
 
     const cleanPath = `${folderPrefix}/${relativePath.replace(/\\/g, '/')}`;
 
+    const uploadOptions: any = {
+      upsert: true,
+      contentType: mimeType,
+    };
+    if (contentEncoding) {
+      uploadOptions.contentEncoding = contentEncoding;
+    }
+
     const { data: uploadData, error: uploadErr } = await supabase.storage
       .from('webxr-assets')
-      .upload(cleanPath, fileData, {
-        upsert: true,
-        contentType: mimeType,
-      });
+      .upload(cleanPath, fileData, uploadOptions);
 
     if (!uploadErr) {
       const { data: urlData } = supabase.storage
@@ -70,15 +83,17 @@ export async function extractAndUploadUnityZip(
         unityUrls.loader = publicUrl;
       } else if (lowerPath.includes('framework.js')) {
         unityUrls.framework = publicUrl;
-      } else if (lowerPath.endsWith('.data') || lowerPath.endsWith('.data.br') || lowerPath.endsWith('.data.gz')) {
+      } else if (lowerPath.includes('.data')) {
         unityUrls.data = publicUrl;
-      } else if (lowerPath.endsWith('.wasm') || lowerPath.endsWith('.wasm.br') || lowerPath.endsWith('.wasm.gz')) {
+      } else if (lowerPath.includes('.wasm')) {
         unityUrls.wasm = publicUrl;
       } else if (lowerPath.endsWith('index.html')) {
         unityUrls.indexUrl = publicUrl;
       } else if (lowerPath.endsWith('.glb') && !firstGlbUrl) {
         firstGlbUrl = publicUrl;
       }
+    } else {
+      console.warn(`[unity-zipper Upload Warning] ${cleanPath}:`, uploadErr.message);
     }
 
     processed++;
@@ -87,5 +102,6 @@ export async function extractAndUploadUnityZip(
     }
   }
 
+  console.log('[unity-zipper] Extracted Unity WebGL URLs:', unityUrls);
   return { unityUrls, firstGlbUrl };
 }
