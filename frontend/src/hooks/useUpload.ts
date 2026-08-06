@@ -42,6 +42,9 @@ export function useUpload() {
         const cleanFileName = `${Date.now()}_${primaryFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
         const filePath = `${folderPrefix}/${cleanFileName}`;
 
+        console.log(`[Upload Stage 6] Queue upload for ${filePath}`);
+        console.log(`[Upload Stage 7] Uploading single asset file...`);
+
         const { data: uploadData, error: uploadErr } = await supabase.storage
           .from('webxr-assets')
           .upload(filePath, primaryFile, {
@@ -50,8 +53,11 @@ export function useUpload() {
           });
 
         if (uploadErr) {
+          console.error('[Upload Stage Exception] Single asset upload failed:', uploadErr.message);
           throw new Error(`Cloud storage upload error: ${uploadErr.message}`);
         }
+
+        console.log(`[Upload Stage 8] Upload complete for single asset ${filePath}`);
 
         const { data: urlData } = supabase.storage
           .from('webxr-assets')
@@ -65,6 +71,8 @@ export function useUpload() {
       const stringifiedUnityUrls = unityUrlsObj && Object.keys(unityUrlsObj).length > 0
         ? JSON.stringify(unityUrlsObj)
         : null;
+
+      console.log('[Upload Stage 9] Creating Project DB row in Supabase...');
 
       // Insert extracted project metadata into Supabase Project database table
       try {
@@ -81,7 +89,7 @@ export function useUpload() {
         });
 
         if (dbErr) {
-          console.warn('[useUpload] Supabase Table insert notice:', dbErr.message);
+          console.warn('[Upload Stage Exception] Supabase Table insert notice:', dbErr.message);
           // Fallback sync via API client route
           await apiClient.post('/projects', {
             id: projectId,
@@ -92,14 +100,18 @@ export function useUpload() {
             unityUrls: unityUrlsObj,
             thumbnail: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
           });
+        } else {
+          console.log('[Upload Stage 9] Project DB row created successfully with ID:', projectId);
         }
-      } catch (syncErr) {
-        console.warn('[useUpload] Database sync fallback notice:', syncErr);
+      } catch (syncErr: any) {
+        console.warn('[Upload Stage Exception] Database sync fallback notice:', syncErr?.message || syncErr);
       }
 
+      console.log('[Upload Stage 10] Redirecting to project page:', `/project/${projectId}`);
       toast.success('Unity WebGL package extracted and launched for WebXR successfully!');
       return { projectId, unityUrls: unityUrlsObj };
     } catch (error: any) {
+      console.error('[Upload Stage Exception] Fatal upload pipeline error:', error);
       const msg = error.message || 'Upload processing failed';
       toast.error(msg);
       throw error;
