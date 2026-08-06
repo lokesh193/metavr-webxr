@@ -14,6 +14,8 @@ import { ProjectCardMenu } from '@/components/ui/ProjectCardMenu';
 import { Heart, Eye, MessageSquare, Send, RotateCw, Layers, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
 
+const SUPABASE_URL = 'https://sswulpqcabktapawrkpu.supabase.co';
+
 export default function ProjectDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -50,6 +52,26 @@ export default function ProjectDetailPage() {
             unityUrls = JSON.parse(unityUrls);
           } catch (e) {}
         }
+
+        // Auto-reconstruct unityUrls from Supabase Storage if missing or empty on legacy rows
+        if (supaProject.type === 'UNITY' && (!unityUrls || Object.keys(unityUrls).length === 0)) {
+          console.log('[ProjectDetailPage] Auto-discovering Unity URLs from Storage bucket for:', projectId);
+          const { data: storageFiles } = await supabase.storage.from('webxr-assets').list(`projects/${projectId}`);
+          if (storageFiles && storageFiles.length > 0) {
+            const reconstructed: any = {};
+            for (const file of storageFiles) {
+              const lower = file.name.toLowerCase();
+              const pubUrl = `${SUPABASE_URL}/storage/v1/object/public/webxr-assets/projects/${projectId}/${file.name}`;
+              if (lower.endsWith('.loader.js')) reconstructed.loader = pubUrl;
+              else if (lower.includes('framework.js')) reconstructed.framework = pubUrl;
+              else if (lower.endsWith('.data')) reconstructed.data = pubUrl;
+              else if (lower.endsWith('.wasm')) reconstructed.wasm = pubUrl;
+              else if (lower.endsWith('index.html')) reconstructed.indexUrl = pubUrl;
+            }
+            unityUrls = reconstructed;
+          }
+        }
+
         setProject({
           ...supaProject,
           unityUrls,
@@ -253,7 +275,7 @@ export default function ProjectDetailPage() {
               value={commentText}
               onChange={(e) => setCommentText(e.target.value)}
               placeholder="Write a comment about this WebXR experience..."
-              className="flex-1 bg-slate-900 border border-border/80 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-primary"
+              className="flex-1 bg-slate-950 border border-border/80 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-primary"
             />
             <button
               type="submit"
