@@ -27,26 +27,33 @@ async function getBrotli() {
   return brotliInstance;
 }
 
-// High-speed direct fetch uploader to Supabase Storage REST API with Cache-Control headers
+// Ultra-fast direct REST uploader to Supabase Storage with Cache-Control & Content-Encoding support
 async function uploadToSupabaseDirect(
   cleanPath: string,
   blob: Blob,
-  mimeType: string
+  mimeType: string,
+  contentEncoding?: string
 ): Promise<string> {
   const endpoint = `${SUPABASE_URL}/storage/v1/object/webxr-assets/${cleanPath}`;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 120000);
 
+  const headers: Record<string, string> = {
+    'Authorization': `Bearer ${SUPABASE_KEY}`,
+    'apikey': SUPABASE_KEY,
+    'Content-Type': mimeType,
+    'x-upsert': 'true',
+    'cache-control': 'public, max-age=31536000, immutable',
+  };
+
+  if (contentEncoding) {
+    headers['Content-Encoding'] = contentEncoding;
+  }
+
   try {
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'apikey': SUPABASE_KEY,
-        'Content-Type': mimeType,
-        'x-upsert': 'true',
-        'cache-control': 'public, max-age=31536000, immutable',
-      },
+      headers,
       body: blob,
       signal: controller.signal,
     });
@@ -100,7 +107,7 @@ export async function extractAndUploadUnityZip(
 
   const brotli = await getBrotli();
 
-  // Process and prepare all file payloads concurrently
+  // Process and upload all ZIP files concurrently with single-pass optimization
   const uploadTasks = fileKeys.map(async (rawPath) => {
     const zipEntry = zipContent.files[rawPath];
     let fileData: Uint8Array;
@@ -113,11 +120,9 @@ export async function extractAndUploadUnityZip(
 
     let targetPath = rawPath;
     let lowerPath = targetPath.toLowerCase();
+    let contentEncoding: string | undefined = undefined;
 
-    const originalData = new Uint8Array(fileData);
-    let isBrotliDecompressed = false;
-
-    // Decompress Brotli (.br) files to uncompressed bytes
+    // Decompress Brotli (.br) files safely
     if (lowerPath.endsWith('.br')) {
       if (brotli) {
         try {
@@ -125,11 +130,13 @@ export async function extractAndUploadUnityZip(
           fileData = new Uint8Array(decompressed);
           targetPath = targetPath.slice(0, -3); // Strip .br extension
           lowerPath = targetPath.toLowerCase();
-          isBrotliDecompressed = true;
           console.log(`[Upload Stage Decompress Success] ${targetPath} (${fileData.byteLength} bytes)`);
         } catch (brErr: any) {
           console.warn(`[Upload Stage Exception] Brotli decompression fallback notice for ${targetPath}:`, brErr);
+          contentEncoding = 'br';
         }
+      } else {
+        contentEncoding = 'br';
       }
     }
 
@@ -154,15 +161,7 @@ export async function extractAndUploadUnityZip(
     const fileBlob = new Blob([fileData as unknown as BlobPart], { type: mimeType });
 
     try {
-      // 1. Upload uncompressed version (.wasm, .data, .framework.js)
-      const publicUrl = await uploadToSupabaseDirect(cleanPath, fileBlob, mimeType);
-
-      // 2. If it was originally a .br file, also upload original .br path as fallback alias
-      if (isBrotliDecompressed) {
-        const brCleanPath = `${folderPrefix}/${rawPath.replace(/\\/g, '/')}`;
-        const brBlob = new Blob([originalData as unknown as BlobPart], { type: mimeType });
-        await uploadToSupabaseDirect(brCleanPath, brBlob, mimeType);
-      }
+      const publicUrl = await uploadToSupabaseDirect(cleanPath, fileBlob, mimeType, contentEncoding);
 
       if (lowerPath.endsWith('.loader.js')) {
         unityUrls.loader = publicUrl;
