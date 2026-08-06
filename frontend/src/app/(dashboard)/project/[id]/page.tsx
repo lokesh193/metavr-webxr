@@ -16,6 +16,26 @@ import { toast } from 'sonner';
 
 const SUPABASE_URL = 'https://sswulpqcabktapawrkpu.supabase.co';
 
+async function listAllStorageFiles(prefix: string): Promise<string[]> {
+  const paths: string[] = [];
+  try {
+    const { data: items } = await supabase.storage.from('webxr-assets').list(prefix, { limit: 100 });
+    if (items) {
+      for (const item of items) {
+        const fullPath = `${prefix}/${item.name}`;
+        if (!item.id || item.id === null) {
+          // Subfolder: search recursively
+          const subPaths = await listAllStorageFiles(fullPath);
+          paths.push(...subPaths);
+        } else {
+          paths.push(fullPath);
+        }
+      }
+    }
+  } catch (e) {}
+  return paths;
+}
+
 export default function ProjectDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -53,15 +73,20 @@ export default function ProjectDetailPage() {
           } catch (e) {}
         }
 
-        // Auto-reconstruct unityUrls from Supabase Storage if missing or empty on legacy rows
-        if (supaProject.type === 'UNITY' && (!unityUrls || Object.keys(unityUrls).length === 0)) {
-          console.log('[ProjectDetailPage] Auto-discovering Unity URLs from Storage bucket for:', projectId);
-          const { data: storageFiles } = await supabase.storage.from('webxr-assets').list(`projects/${projectId}`);
-          if (storageFiles && storageFiles.length > 0) {
+        // Auto-reconstruct unityUrls recursively from Supabase Storage if missing or incomplete
+        if (
+          supaProject.type === 'UNITY' &&
+          (!unityUrls || !unityUrls.loader || Object.keys(unityUrls).length === 0)
+        ) {
+          console.log('[ProjectDetailPage] Auto-discovering nested Unity URLs from Storage bucket for:', projectId);
+          const allFilePaths = await listAllStorageFiles(`projects/${projectId}`);
+          console.log('[ProjectDetailPage] Found file paths in storage:', allFilePaths);
+
+          if (allFilePaths.length > 0) {
             const reconstructed: any = {};
-            for (const file of storageFiles) {
-              const lower = file.name.toLowerCase();
-              const pubUrl = `${SUPABASE_URL}/storage/v1/object/public/webxr-assets/projects/${projectId}/${file.name}`;
+            for (const path of allFilePaths) {
+              const lower = path.toLowerCase();
+              const pubUrl = `${SUPABASE_URL}/storage/v1/object/public/webxr-assets/${path}`;
               if (lower.endsWith('.loader.js')) reconstructed.loader = pubUrl;
               else if (lower.includes('framework.js')) reconstructed.framework = pubUrl;
               else if (lower.endsWith('.data')) reconstructed.data = pubUrl;
@@ -69,6 +94,14 @@ export default function ProjectDetailPage() {
               else if (lower.endsWith('index.html')) reconstructed.indexUrl = pubUrl;
             }
             unityUrls = reconstructed;
+
+            // Persist reconstructed URLs back to DB for instant future loads
+            if (unityUrls.loader) {
+              await supabase
+                .from('Project')
+                .update({ unityUrls: JSON.stringify(unityUrls) })
+                .eq('id', projectId);
+            }
           }
         }
 
