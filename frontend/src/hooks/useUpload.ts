@@ -52,11 +52,17 @@ export function useUpload() {
       toast.success('Asset uploaded and processed successfully!');
       return data;
     } catch (error: any) {
-      const msg =
-        error.response?.data?.error ||
-        (error.message?.includes('Network Error') || !error.response
-          ? 'Backend connection error. Please use http://localhost:3000/upload or set production backend HTTPS URL.'
-          : 'Upload failed');
+      const isNetworkOrMixedContent =
+        !error.response ||
+        error.message?.includes('Network Error') ||
+        error.response?.status === 413 ||
+        error.response?.status === 500 ||
+        error.response?.status === 502;
+
+      const msg = isNetworkOrMixedContent
+        ? 'Please use http://localhost:3000/upload to upload full Unity WebGL builds up to 1GB!'
+        : error.response?.data?.error || 'Upload failed';
+
       toast.error(msg);
       throw error;
     } finally {
