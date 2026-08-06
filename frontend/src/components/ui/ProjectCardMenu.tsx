@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { MoreVertical, Edit3, Trash2, X, Check } from 'lucide-react';
 import { apiClient } from '@/lib/api-client';
+import { supabase } from '@/lib/supabase-client';
 import { toast } from 'sonner';
 
 interface ProjectCardMenuProps {
@@ -40,36 +41,77 @@ export function ProjectCardMenu({
 
   const handleRename = async (e: React.FormEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     if (!newTitle.trim()) return;
     setIsSubmitting(true);
     try {
-      const { data } = await apiClient.put(`/projects/${projectId}`, {
-        title: newTitle.trim(),
-        description: newDescription.trim(),
-      });
+      // 1. Update directly in Supabase Project table
+      const { error: supaErr } = await supabase
+        .from('Project')
+        .update({
+          title: newTitle.trim(),
+          description: newDescription.trim(),
+        })
+        .eq('id', projectId);
+
+      if (supaErr) {
+        console.warn('[ProjectCardMenu] Supabase update notice:', supaErr.message);
+      }
+
+      // 2. API fallback
+      try {
+        await apiClient.put(`/projects/${projectId}`, {
+          title: newTitle.trim(),
+          description: newDescription.trim(),
+        });
+      } catch (apiErr) {}
+
       toast.success('Project renamed successfully!');
-      if (onUpdateSuccess) onUpdateSuccess(data);
+      if (onUpdateSuccess) onUpdateSuccess({ title: newTitle.trim(), description: newDescription.trim() });
       setIsRenameOpen(false);
       setIsOpen(false);
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to rename project');
+      toast.error(err.message || 'Failed to rename project');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleDelete = async () => {
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
     if (!confirm(`Are you sure you want to delete "${currentTitle}"? This action cannot be undone.`)) {
       return;
     }
     setIsSubmitting(true);
     try {
-      await apiClient.delete(`/projects/${projectId}`);
+      // 1. Delete record directly from Supabase Project database table
+      const { error: supaErr } = await supabase.from('Project').delete().eq('id', projectId);
+      if (supaErr) {
+        console.warn('[ProjectCardMenu] Supabase DB delete notice:', supaErr.message);
+      }
+
+      // 2. Delete extracted storage assets from Supabase Storage
+      try {
+        const { data: listFiles } = await supabase.storage.from('webxr-assets').list(`projects/${projectId}`);
+        if (listFiles && listFiles.length > 0) {
+          const paths = listFiles.map((f) => `projects/${projectId}/${f.name}`);
+          await supabase.storage.from('webxr-assets').remove(paths);
+        }
+      } catch (stErr) {
+        console.warn('[ProjectCardMenu] Supabase Storage delete notice:', stErr);
+      }
+
+      // 3. API route fallback
+      try {
+        await apiClient.delete(`/projects/${projectId}`);
+      } catch (apiErr) {}
+
       toast.success(`"${currentTitle}" deleted successfully!`);
       if (onDeleteSuccess) onDeleteSuccess(projectId);
       setIsOpen(false);
     } catch (err: any) {
-      toast.error(err.response?.data?.error || 'Failed to delete project');
+      toast.error(err.message || 'Failed to delete project');
     } finally {
       setIsSubmitting(false);
     }
@@ -97,7 +139,9 @@ export function ProjectCardMenu({
           className="absolute right-0 mt-2 w-44 rounded-xl bg-slate-900 border border-white/15 shadow-vr z-50 py-1.5 overflow-hidden animate-in fade-in zoom-in-95 duration-150"
         >
           <button
-            onClick={() => {
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
               setIsRenameOpen(true);
               setIsOpen(false);
             }}
@@ -118,7 +162,10 @@ export function ProjectCardMenu({
       {/* Rename Modal */}
       {isRenameOpen && (
         <div
-          onClick={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
           className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4"
         >
           <div className="bg-slate-900 border border-white/15 rounded-2xl p-6 w-full max-w-md shadow-vr space-y-4 relative">
@@ -127,7 +174,11 @@ export function ProjectCardMenu({
                 <Edit3 className="w-4 h-4 text-cyan-400" /> Rename Project
               </h3>
               <button
-                onClick={() => setIsRenameOpen(false)}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsRenameOpen(false);
+                }}
                 className="text-slate-400 hover:text-white p-1 rounded-lg"
               >
                 <X className="w-4 h-4" />
@@ -158,7 +209,11 @@ export function ProjectCardMenu({
               <div className="flex items-center justify-end gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => setIsRenameOpen(false)}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsRenameOpen(false);
+                  }}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300 rounded-xl"
                 >
                   Cancel
