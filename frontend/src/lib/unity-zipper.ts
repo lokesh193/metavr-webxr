@@ -27,7 +27,7 @@ async function getBrotli() {
   return brotliInstance;
 }
 
-// Direct fetch uploader to Supabase Storage REST API with AbortController & 120s timeout
+// High-speed direct fetch uploader to Supabase Storage REST API with Cache-Control headers
 async function uploadToSupabaseDirect(
   cleanPath: string,
   blob: Blob,
@@ -45,6 +45,7 @@ async function uploadToSupabaseDirect(
         'apikey': SUPABASE_KEY,
         'Content-Type': mimeType,
         'x-upsert': 'true',
+        'cache-control': 'public, max-age=31536000, immutable',
       },
       body: blob,
       signal: controller.signal,
@@ -77,7 +78,7 @@ export async function extractAndUploadUnityZip(
   onProgress?: (pct: number) => void
 ): Promise<{ unityUrls: ExtractedUnityUrls; firstGlbUrl?: string }> {
   console.log('[Upload Stage 1] Opening ZIP package...');
-  toast.info('Extracting Unity WebGL package & uploading WebXR assets in parallel...');
+  toast.info('Extracting Unity WebGL package & optimizing WebXR assets for high speed streaming...');
   
   const zip = new JSZip();
   let zipContent: JSZip;
@@ -99,7 +100,7 @@ export async function extractAndUploadUnityZip(
 
   const brotli = await getBrotli();
 
-  // Process and prepare all file payloads
+  // Process and prepare all file payloads concurrently
   const uploadTasks = fileKeys.map(async (rawPath) => {
     const zipEntry = zipContent.files[rawPath];
     let fileData: Uint8Array;
@@ -139,6 +140,23 @@ export async function extractAndUploadUnityZip(
         console.log(`[Upload Stage Decompress Success] Gzip ${targetPath} (${fileData.byteLength} bytes)`);
       } catch (gzErr: any) {
         console.warn(`[Upload Stage Exception] Gzip decompression fallback notice for ${targetPath}:`, gzErr);
+      }
+    }
+
+    // Auto-rewrite index.html if it contains references to .br extensions
+    if (lowerPath.endsWith('index.html')) {
+      try {
+        const decoder = new TextDecoder('utf-8');
+        let htmlText = decoder.decode(fileData);
+        // Replace .data.br -> .data, .framework.js.br -> .framework.js, .wasm.br -> .wasm
+        htmlText = htmlText
+          .replace(/\.data\.br/g, '.data')
+          .replace(/\.framework\.js\.br/g, '.framework.js')
+          .replace(/\.wasm\.br/g, '.wasm');
+        fileData = new TextEncoder().encode(htmlText);
+        console.log('[Upload Stage Index Rewriter] Auto-corrected index.html asset references to uncompressed endpoints.');
+      } catch (htmlErr) {
+        console.warn('[Upload Stage Index Rewriter Warning]:', htmlErr);
       }
     }
 
