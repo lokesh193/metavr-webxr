@@ -1,5 +1,4 @@
 import JSZip from 'jszip';
-import { supabase } from '@/lib/supabase-client';
 import { toast } from 'sonner';
 
 export interface ExtractedUnityUrls {
@@ -9,6 +8,9 @@ export interface ExtractedUnityUrls {
   wasm?: string;
   indexUrl?: string;
 }
+
+const SUPABASE_URL = 'https://sswulpqcabktapawrkpu.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_paptoQFNQEfleoGLclPgWw_C7udk9dd';
 
 let brotliInstance: any = null;
 
@@ -25,13 +27,58 @@ async function getBrotli() {
   return brotliInstance;
 }
 
+// Robust direct fetch to Supabase Storage REST API with AbortController timeout & HTTP status handling
+async function uploadToSupabaseDirect(
+  cleanPath: string,
+  blob: Blob,
+  mimeType: string
+): Promise<string> {
+  const endpoint = `${SUPABASE_URL}/storage/v1/object/webxr-assets/${cleanPath}`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 second hard timeout per file
+
+  try {
+    console.log(`[Direct Fetch Uploading] ${cleanPath} (${blob.size} bytes)...`);
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'apikey': SUPABASE_KEY,
+        'Content-Type': mimeType,
+        'x-upsert': 'true',
+      },
+      body: blob,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`[Direct Fetch Error ${response.status}] ${cleanPath}:`, errText);
+      throw new Error(`Storage upload failed (${response.status}): ${errText}`);
+    }
+
+    const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/webxr-assets/${cleanPath}`;
+    console.log(`[Direct Fetch Success] ${cleanPath}: ${publicUrl}`);
+    return publicUrl;
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      console.error(`[Direct Fetch Timeout] Upload timed out after 90s for ${cleanPath}`);
+      throw new Error(`Upload timed out after 90s for ${cleanPath}`);
+    }
+    console.error(`[Direct Fetch Exception] ${cleanPath}:`, err.message || err);
+    throw err;
+  }
+}
+
 export async function extractAndUploadUnityZip(
   zipFile: File,
   folderPrefix: string,
   onProgress?: (pct: number) => void
 ): Promise<{ unityUrls: ExtractedUnityUrls; firstGlbUrl?: string }> {
   console.log('[Upload Stage 1] Opening ZIP package...');
-  toast.info('Extracting Unity WebGL package & optimizing storage payload...');
+  toast.info('Extracting Unity WebGL package & uploading WebXR assets...');
   
   const zip = new JSZip();
   let zipContent: JSZip;
@@ -52,7 +99,7 @@ export async function extractAndUploadUnityZip(
   let firstGlbUrl: string | undefined = undefined;
 
   const brotli = await getBrotli();
-  const MAX_DECOMPRESS_LIMIT = 40 * 1024 * 1024; // 40 MB threshold to prevent exceeding cloud storage file size limits
+  const MAX_DECOMPRESS_LIMIT = 40 * 1024 * 1024; // 40 MB limit to keep uncompressed payload within standard single request bounds
 
   for (let rawPath of files) {
     const zipEntry = zipContent.files[rawPath];
@@ -71,7 +118,7 @@ export async function extractAndUploadUnityZip(
     let targetPath = rawPath;
     let lowerPath = targetPath.toLowerCase();
 
-    // Smart Decompression: Decompress Brotli (.br) files if uncompressed size is within cloud limits
+    // Decompress Brotli (.br) files safely if within 40MB limit
     if (lowerPath.endsWith('.br')) {
       if (brotli) {
         try {
@@ -82,7 +129,7 @@ export async function extractAndUploadUnityZip(
             lowerPath = targetPath.toLowerCase();
             console.log(`[Upload Stage Decompress Success] ${targetPath} (${fileData.byteLength} bytes)`);
           } else {
-            console.log(`[Upload Smart Compression] ${targetPath} decompressed size (${decompressed.byteLength} bytes) exceeds 40MB cloud limit. Preserving compressed Brotli asset (${fileData.byteLength} bytes).`);
+            console.log(`[Upload Smart Compression] ${targetPath} decompressed size (${decompressed.byteLength} bytes) > 40MB limit. Preserving Brotli compression (${fileData.byteLength} bytes).`);
           }
         } catch (brErr: any) {
           console.warn(`[Upload Stage Exception] Brotli decompression fallback notice for ${targetPath}:`, brErr);
@@ -124,54 +171,36 @@ export async function extractAndUploadUnityZip(
     }
 
     const cleanPath = `${folderPrefix}/${targetPath.replace(/\\/g, '/')}`;
-
-    // Create standard browser Blob passing Uint8Array directly
     const fileBlob = new Blob([fileData as unknown as BlobPart], { type: mimeType });
 
-    console.log(`[Upload Stage 6] Queue upload for ${cleanPath}`);
-    console.log(`[Upload Diagnostics] Blob Size: ${fileBlob.size} bytes, MIME: ${mimeType}`);
+    console.log(`[Upload Stage 6] Queue upload for ${cleanPath} (Blob Size: ${fileBlob.size} bytes, MIME: ${mimeType})`);
 
     try {
       console.log(`[Upload Stage 7] Uploading file ${cleanPath}...`);
-      console.time(`Supabase upload: ${cleanPath}`);
+      console.time(`Direct upload: ${cleanPath}`);
 
-      const { data: uploadData, error: uploadErr } = await supabase.storage
-        .from('webxr-assets')
-        .upload(cleanPath, fileBlob, {
-          upsert: true,
-          contentType: mimeType,
-        });
+      const publicUrl = await uploadToSupabaseDirect(cleanPath, fileBlob, mimeType);
 
-      console.timeEnd(`Supabase upload: ${cleanPath}`);
+      console.timeEnd(`Direct upload: ${cleanPath}`);
+      console.log(`[Upload Stage 8] Upload complete for ${cleanPath}`);
 
-      if (uploadErr) {
-        console.error(`[Upload Stage Exception] Supabase upload error for ${cleanPath}:`, uploadErr.message);
-      } else {
-        console.log(`[Upload Stage 8] Upload complete for ${cleanPath}`);
-
-        const { data: urlData } = supabase.storage
-          .from('webxr-assets')
-          .getPublicUrl(cleanPath);
-
-        const publicUrl = urlData.publicUrl;
-
-        if (lowerPath.endsWith('.loader.js')) {
-          unityUrls.loader = publicUrl;
-        } else if (lowerPath.includes('framework.js')) {
-          unityUrls.framework = publicUrl;
-        } else if (lowerPath.includes('.data')) {
-          unityUrls.data = publicUrl;
-        } else if (lowerPath.includes('.wasm')) {
-          unityUrls.wasm = publicUrl;
-        } else if (lowerPath.endsWith('index.html')) {
-          unityUrls.indexUrl = publicUrl;
-        } else if (lowerPath.endsWith('.glb') && !firstGlbUrl) {
-          firstGlbUrl = publicUrl;
-        }
+      if (lowerPath.endsWith('.loader.js')) {
+        unityUrls.loader = publicUrl;
+      } else if (lowerPath.includes('framework.js')) {
+        unityUrls.framework = publicUrl;
+      } else if (lowerPath.includes('.data')) {
+        unityUrls.data = publicUrl;
+      } else if (lowerPath.includes('.wasm')) {
+        unityUrls.wasm = publicUrl;
+      } else if (lowerPath.endsWith('index.html')) {
+        unityUrls.indexUrl = publicUrl;
+      } else if (lowerPath.endsWith('.glb') && !firstGlbUrl) {
+        firstGlbUrl = publicUrl;
       }
     } catch (upEx: any) {
-      console.timeEnd(`Supabase upload: ${cleanPath}`);
-      console.error(`[Upload Stage Exception] Upload failed for ${cleanPath}:`, upEx.message || upEx);
+      console.timeEnd(`Direct upload: ${cleanPath}`);
+      console.error(`[Upload Stage Exception] Upload error for ${cleanPath}:`, upEx.message || upEx);
+      toast.error(`Asset upload notice: ${upEx.message || 'File upload issue'}`);
     }
 
     processed++;
