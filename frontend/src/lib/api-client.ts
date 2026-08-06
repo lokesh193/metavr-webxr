@@ -5,14 +5,8 @@ function getApiBaseUrl() {
     return process.env.NEXT_PUBLIC_API_URL;
   }
   if (typeof window !== 'undefined') {
-    const hostname = window.location.hostname;
-    // On Vercel production HTTPS deployment, route to the active HTTPS tunnel URL
-    if (hostname.includes('vercel.app')) {
-      return 'https://stupid-dingos-build.loca.lt/api';
-    }
-    if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
-      return `http://${hostname}:5000/api`;
-    }
+    // Relative /api endpoint works seamlessly on local dev server and Vercel!
+    return '/api';
   }
   return 'http://localhost:5000/api';
 }
@@ -32,8 +26,6 @@ apiClient.interceptors.request.use(
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
-      // Add bypass header for localtunnel proxy page
-      config.headers['Bypass-Tunnel-Remainder'] = 'true';
     }
     return config;
   },
