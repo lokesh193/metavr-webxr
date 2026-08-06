@@ -52,7 +52,11 @@ export function useUpload() {
       toast.success('Asset uploaded and processed successfully!');
       return data;
     } catch (error: any) {
-      const msg = error.response?.data?.error || 'Upload failed';
+      const msg =
+        error.response?.data?.error ||
+        (error.message?.includes('Network Error') || !error.response
+          ? 'Backend connection error. Please use http://localhost:3000/upload or set production backend HTTPS URL.'
+          : 'Upload failed');
       toast.error(msg);
       throw error;
     } finally {
