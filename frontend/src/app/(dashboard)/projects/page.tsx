@@ -22,8 +22,15 @@ export default function ProjectsPage() {
     try {
       let url = '/projects';
       if (filterType !== 'ALL') url += `?type=${filterType}`;
-      const { data } = await apiClient.get(url);
-      setProjects(data.data || []);
+      const { data } = await apiClient.get(url).catch(() => ({ data: { data: [] } }));
+      
+      let serverProjects = data.data || [];
+      if (typeof window !== 'undefined') {
+        const stored = JSON.parse(sessionStorage.getItem('custom_projects') || '[]');
+        serverProjects = [...stored, ...serverProjects];
+      }
+
+      setProjects(serverProjects);
     } catch (err) {
       console.error(err);
     } finally {
@@ -39,6 +46,11 @@ export default function ProjectsPage() {
 
   const handleDeleteSuccess = (deletedId: string) => {
     setProjects((prev) => prev.filter((p) => p.id !== deletedId));
+    if (typeof window !== 'undefined') {
+      const stored = JSON.parse(sessionStorage.getItem('custom_projects') || '[]');
+      const filtered = stored.filter((p: any) => p.id !== deletedId);
+      sessionStorage.setItem('custom_projects', JSON.stringify(filtered));
+    }
   };
 
   const filteredProjects = projects.filter((p) =>

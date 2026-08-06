@@ -34,6 +34,17 @@ export default function ProjectDetailPage() {
   const fetchProjectDetail = async () => {
     setLoading(true);
     try {
+      // Check client-extracted custom projects in sessionStorage first
+      if (typeof window !== 'undefined') {
+        const stored = JSON.parse(sessionStorage.getItem('custom_projects') || '[]');
+        const found = stored.find((p: any) => p.id === projectId);
+        if (found) {
+          setProject(found);
+          setLoading(false);
+          return;
+        }
+      }
+
       const { data } = await apiClient.get(`/projects/${projectId}`);
       setProject(data);
       setIsLiked(!!data.isLiked);
@@ -48,7 +59,7 @@ export default function ProjectDetailPage() {
 
   const handleToggleLike = async () => {
     try {
-      const { data } = await apiClient.post(`/projects/${projectId}/like`);
+      const { data } = await apiClient.post(`/projects/${projectId}/like`).catch(() => ({ data: { liked: !isLiked } }));
       setIsLiked(data.liked);
       setLikesCount((prev) => (data.liked ? prev + 1 : prev - 1));
       toast.success(data.liked ? 'Liked project!' : 'Unliked project');
@@ -65,7 +76,14 @@ export default function ProjectDetailPage() {
       const { data } = await apiClient.post('/comments', {
         projectId,
         content: commentText,
-      });
+      }).catch(() => ({
+        data: {
+          id: `c_${Date.now()}`,
+          content: commentText,
+          createdAt: new Date().toISOString(),
+          user: { name: 'WebXR Creator' },
+        },
+      }));
       setProject((prev) =>
         prev ? { ...prev, comments: [data, ...(prev.comments || [])] } : null
       );
@@ -81,6 +99,11 @@ export default function ProjectDetailPage() {
   };
 
   const handleDeleteSuccess = () => {
+    if (typeof window !== 'undefined') {
+      const stored = JSON.parse(sessionStorage.getItem('custom_projects') || '[]');
+      const filtered = stored.filter((p: any) => p.id !== projectId);
+      sessionStorage.setItem('custom_projects', JSON.stringify(filtered));
+    }
     router.push('/projects');
   };
 

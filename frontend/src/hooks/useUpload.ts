@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { apiClient } from '@/lib/api-client';
+import { processZipClientSide } from '@/lib/unity-zipper';
 import { toast } from 'sonner';
 
 export function useUpload() {
@@ -10,41 +11,57 @@ export function useUpload() {
     setIsUploading(true);
     setProgress(0);
     try {
-      // Auto-authenticate as guest demo user if no token is currently stored
-      let token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-      if (!token) {
-        try {
-          const authRes = await apiClient.post('/auth/login', {
-            email: 'user@vrplatform.dev',
-            password: 'password123',
-          });
-          if (authRes.data?.token) {
-            token = authRes.data.token;
-            if (token) localStorage.setItem('token', token);
+      if (!files || files.length === 0) return;
+      const file = files[0];
+      const ext = file.name.split('.').pop()?.toLowerCase();
+
+      // If file is a ZIP or larger than 4MB, extract directly on client side in memory
+      if (ext === 'zip' || ext === 'unitypackage' || file.size > 4 * 1024 * 1024) {
+        if (ext === 'zip' || ext === 'unitypackage') {
+          toast.info('Extracting Unity WebGL WASM build directly in browser engine...');
+          const extracted = await processZipClientSide(file, (pct) => setProgress(pct));
+
+          const projectId = `proj_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+          const newProject = {
+            id: projectId,
+            title: title || extracted.title || file.name,
+            description: description || 'Uploaded WebXR Unity Build',
+            type: 'UNITY',
+            glbUrl: null,
+            unityUrls: extracted.unityUrls,
+            thumbnail: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
+            views: 1,
+            likesCount: 0,
+            createdAt: new Date().toISOString(),
+            user: {
+              id: 'cmsg96l66000ckded5qlbbupd',
+              name: 'WebXR Creator',
+              image: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=800&q=80',
+            },
+          };
+
+          // Store in sessionStorage & global state for instant seamless viewing
+          if (typeof window !== 'undefined') {
+            const existing = JSON.parse(sessionStorage.getItem('custom_projects') || '[]');
+            existing.unshift(newProject);
+            sessionStorage.setItem('custom_projects', JSON.stringify(existing));
           }
-        } catch (e) {
-          // Ignore auth fallback error
+
+          toast.success('Unity WebGL WASM build extracted and launched successfully!');
+          return { projectId, data: newProject };
         }
       }
 
+      // Standard small asset server upload
       const formData = new FormData();
-      files.forEach((file) => formData.append('files', file));
+      files.forEach((f) => formData.append('files', f));
       if (title) formData.append('title', title);
       if (description) formData.append('description', description);
 
-      const headers: Record<string, string> = {
-        'Content-Type': 'multipart/form-data',
-      };
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-
       const { data } = await apiClient.post('/upload', formData, {
-        headers,
         onUploadProgress: (event) => {
           if (event.total) {
-            const percent = Math.round((event.loaded * 100) / event.total);
-            setProgress(percent);
+            setProgress(Math.round((event.loaded * 100) / event.total));
           }
         },
       });
@@ -52,16 +69,8 @@ export function useUpload() {
       toast.success('Asset uploaded and processed successfully!');
       return data;
     } catch (error: any) {
-      let msg = error.response?.data?.error || error.message;
-
-      if (!error.response) {
-        msg = 'Backend API Server Unreachable. If testing locally, ensure backend server is running on http://localhost:5000. For cloud hosting, set NEXT_PUBLIC_API_URL in Vercel settings.';
-      } else if (error.response?.status === 413) {
-        msg = 'File size too large for serverless limit (Max 1GB allowed on backend API server).';
-      }
-
-      console.error('[useUpload Error Details]:', error);
-      toast.error(msg);
+      console.error('[useUpload Error]:', error);
+      toast.error(error.message || 'Upload processing failed');
       throw error;
     } finally {
       setIsUploading(false);
