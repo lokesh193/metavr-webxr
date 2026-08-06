@@ -10,6 +10,9 @@ export interface ExtractedUnityUrls {
   indexUrl?: string;
 }
 
+const SUPABASE_URL = 'https://sswulpqcabktapawrkpu.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_paptoQFNQEfleoGLclPgWw_C7udk9dd';
+
 let brotliInstance: any = null;
 
 async function getBrotli() {
@@ -23,6 +26,60 @@ async function getBrotli() {
     }
   }
   return brotliInstance;
+}
+
+// Direct XHR upload to Supabase Storage REST API with progress tracking & guaranteed resolution
+function uploadToSupabaseDirect(
+  cleanPath: string,
+  fileData: ArrayBuffer,
+  mimeType: string,
+  onFileProgress?: (pct: number) => void
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const endpointUrl = `${SUPABASE_URL}/storage/v1/object/webxr-assets/${cleanPath}`;
+
+    xhr.open('POST', endpointUrl, true);
+    xhr.setRequestHeader('Authorization', `Bearer ${SUPABASE_KEY}`);
+    xhr.setRequestHeader('apikey', SUPABASE_KEY);
+    xhr.setRequestHeader('Content-Type', mimeType);
+    xhr.setRequestHeader('x-upsert', 'true');
+    xhr.timeout = 120000; // 2 minute timeout for large 20MB+ files
+
+    if (xhr.upload && onFileProgress) {
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const pct = Math.round((event.loaded / event.total) * 100);
+          onFileProgress(pct);
+        }
+      };
+    }
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        const publicUrl = `${SUPABASE_URL}/storage/v1/object/public/webxr-assets/${cleanPath}`;
+        console.log(`[XHR Upload Success ${xhr.status}] ${cleanPath}`);
+        resolve(publicUrl);
+      } else {
+        const errText = xhr.responseText || `HTTP ${xhr.status} ${xhr.statusText}`;
+        console.error(`[XHR Upload Error ${xhr.status}] ${cleanPath}:`, errText);
+        reject(new Error(`Storage upload failed (${xhr.status}): ${errText}`));
+      }
+    };
+
+    xhr.onerror = () => {
+      console.error(`[XHR Upload Network Error] ${cleanPath}`);
+      reject(new Error(`Network error uploading file to Supabase Storage.`));
+    };
+
+    xhr.ontimeout = () => {
+      console.error(`[XHR Upload Timeout] ${cleanPath} after 120s`);
+      reject(new Error(`Upload timed out after 120s for ${cleanPath}.`));
+    };
+
+    console.log(`[XHR Upload Starting] ${cleanPath} (${fileData.byteLength} bytes)`);
+    xhr.send(fileData);
+  });
 }
 
 export async function extractAndUploadUnityZip(
@@ -86,7 +143,7 @@ export async function extractAndUploadUnityZip(
           fileData = new Uint8Array(decompressedWasm);
           targetPath = targetPath.slice(0, -3); // Strip .br extension
           lowerPath = targetPath.toLowerCase();
-          console.log(`[Upload Stage Decompress Success] ${targetPath}`);
+          console.log(`[Upload Stage Decompress Success] ${targetPath} (${fileData.byteLength} bytes)`);
         } catch (brErr: any) {
           console.error(`[Upload Stage Exception] Brotli decompression failed for ${targetPath}:`, brErr);
         }
@@ -101,7 +158,7 @@ export async function extractAndUploadUnityZip(
         fileData = new Uint8Array(decompressedArray);
         targetPath = targetPath.slice(0, -3);
         lowerPath = targetPath.toLowerCase();
-        console.log(`[Upload Stage Decompress Success] Gzip ${targetPath}`);
+        console.log(`[Upload Stage Decompress Success] Gzip ${targetPath} (${fileData.byteLength} bytes)`);
       } catch (gzErr: any) {
         console.error(`[Upload Stage Exception] Gzip decompression failed for ${targetPath}:`, gzErr);
       }
@@ -125,63 +182,50 @@ export async function extractAndUploadUnityZip(
     }
 
     const cleanPath = `${folderPrefix}/${targetPath.replace(/\\/g, '/')}`;
-    const fileName = targetPath.split('/').pop() || 'asset.bin';
 
-    // Slice array view into clean ArrayBuffer to guarantee proper File construction
+    // Slice array view into clean ArrayBuffer to guarantee proper transfer
     const cleanArrayBuffer = fileData.buffer.slice(
       fileData.byteOffset,
       fileData.byteOffset + fileData.byteLength
     ) as ArrayBuffer;
 
-    const fileObject = new File([cleanArrayBuffer], fileName, { type: mimeType });
-
     console.log(`[Upload Stage 6] Queue upload for ${cleanPath}`);
-    console.log(`[Upload Diagnostics] Object Constructor: ${fileObject.constructor.name}, Size: ${fileObject.size} bytes, MIME: ${fileObject.type}`);
+    console.log(`[Upload Diagnostics] Buffer Size: ${cleanArrayBuffer.byteLength} bytes, MIME: ${mimeType}`);
 
     try {
       console.log(`[Upload Stage 7] Uploading file ${cleanPath}...`);
-      console.time(`supabase upload: ${cleanPath}`);
+      console.time(`XHR upload: ${cleanPath}`);
 
-      const uploadPromise = supabase.storage.from('webxr-assets').upload(cleanPath, fileObject, {
-        upsert: true,
-        contentType: mimeType,
-      });
-
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error(`Upload timeout after 30 seconds for ${cleanPath}`)), 30000)
+      const publicUrl = await uploadToSupabaseDirect(
+        cleanPath,
+        cleanArrayBuffer,
+        mimeType,
+        (filePct) => {
+          const totalPct = Math.round(((processed + filePct / 100) / totalFiles) * 100);
+          if (onProgress) onProgress(totalPct);
+        }
       );
 
-      const { data: uploadData, error: uploadErr }: any = await Promise.race([uploadPromise, timeoutPromise]);
-      console.timeEnd(`supabase upload: ${cleanPath}`);
+      console.timeEnd(`XHR upload: ${cleanPath}`);
+      console.log(`[Upload Stage 8] Upload complete for ${cleanPath}: ${publicUrl}`);
 
-      if (uploadErr) {
-        console.error(`[Upload Stage Exception] Supabase upload failed for ${cleanPath}:`, uploadErr.message);
-      } else {
-        console.log(`[Upload Stage 8] Upload complete for ${cleanPath}:`, uploadData);
-
-        const { data: urlData } = supabase.storage
-          .from('webxr-assets')
-          .getPublicUrl(cleanPath);
-
-        const publicUrl = urlData.publicUrl;
-
-        if (lowerPath.endsWith('.loader.js')) {
-          unityUrls.loader = publicUrl;
-        } else if (lowerPath.includes('framework.js')) {
-          unityUrls.framework = publicUrl;
-        } else if (lowerPath.endsWith('.data')) {
-          unityUrls.data = publicUrl;
-        } else if (lowerPath.endsWith('.wasm')) {
-          unityUrls.wasm = publicUrl;
-        } else if (lowerPath.endsWith('index.html')) {
-          unityUrls.indexUrl = publicUrl;
-        } else if (lowerPath.endsWith('.glb') && !firstGlbUrl) {
-          firstGlbUrl = publicUrl;
-        }
+      if (lowerPath.endsWith('.loader.js')) {
+        unityUrls.loader = publicUrl;
+      } else if (lowerPath.includes('framework.js')) {
+        unityUrls.framework = publicUrl;
+      } else if (lowerPath.endsWith('.data')) {
+        unityUrls.data = publicUrl;
+      } else if (lowerPath.endsWith('.wasm')) {
+        unityUrls.wasm = publicUrl;
+      } else if (lowerPath.endsWith('index.html')) {
+        unityUrls.indexUrl = publicUrl;
+      } else if (lowerPath.endsWith('.glb') && !firstGlbUrl) {
+        firstGlbUrl = publicUrl;
       }
     } catch (upEx: any) {
-      console.timeEnd(`supabase upload: ${cleanPath}`);
-      console.error(`[Upload Stage Exception] Unexpected exception/timeout during upload of ${cleanPath}:`, upEx.message || upEx);
+      console.timeEnd(`XHR upload: ${cleanPath}`);
+      console.error(`[Upload Stage Exception] Upload failed for ${cleanPath}:`, upEx.message || upEx);
+      toast.error(`Upload error for ${cleanPath}: ${upEx.message}`);
     }
 
     processed++;
