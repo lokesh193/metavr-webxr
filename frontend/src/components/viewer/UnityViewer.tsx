@@ -68,6 +68,7 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
         setLoading(false);
       })
       .catch((err) => {
+        console.error('[UnityViewer Error]:', err);
         setLoadError(err?.message || 'Failed to load Unity WebGL WASM binaries');
         setLoading(false);
       });
@@ -149,7 +150,7 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
       ref={containerRef}
       className="relative w-full h-full min-h-[500px] bg-slate-950 rounded-2xl overflow-hidden border border-border/60 flex items-center justify-center group shadow-vr"
     >
-      <canvas ref={canvasRef} className="w-full h-full object-cover" tabIndex={0} />
+      <canvas id="unity-canvas" ref={canvasRef} className="w-full h-full object-cover" tabIndex={0} />
 
       {/* GPU WASM Streaming Loading Screen */}
       {loading && !loadError && (

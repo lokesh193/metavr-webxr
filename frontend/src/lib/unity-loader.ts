@@ -15,6 +15,11 @@ export function loadUnityInstance(
       return reject(new Error('Unity loader URL missing'));
     }
 
+    // Assign explicit canvas ID required by Unity's _JS_SystemInfo_GetCanvasClientSize
+    if (!canvas.id) {
+      canvas.id = 'unity-canvas';
+    }
+
     // Reuse existing loader script if present
     let script = document.querySelector(`script[src="${config.loaderUrl}"]`) as HTMLScriptElement;
 
