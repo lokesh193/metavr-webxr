@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { loadUnityInstance } from '@/lib/unity-loader';
 import { UnityUrls } from '@/types';
 import { Progress } from '../ui/progress';
-import { Play, Glasses, Maximize2, AlertCircle, CheckCircle2, Zap } from 'lucide-react';
+import { Play, Glasses, Maximize2, AlertCircle, CheckCircle2, Zap, Layout } from 'lucide-react';
 import { useVRStore } from '@/hooks/useVR';
 import { checkWebXRSupport, DeviceXRMatrix } from '@/lib/webxr-utils';
 
@@ -22,6 +22,8 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
   const [xrStatus, setXrStatus] = useState<DeviceXRMatrix | null>(null);
   const [unityInstance, setUnityInstance] = useState<any>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Default to iframe mode whenever creator's index.html exists!
+  const [useIframeMode, setUseIframeMode] = useState<boolean>(!!urls?.indexUrl);
   const { setIsPresenting } = useVRStore();
 
   useEffect(() => {
@@ -29,31 +31,28 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
   }, []);
 
   useEffect(() => {
-    if (!canvasRef.current) return;
-    
-    // Resolve loader, framework, data, and wasm URLs
-    const loaderUrl = urls?.loader || urls?.indexUrl;
-    if (!loaderUrl) {
-      setLoadError('Unity loader.js script URL is missing from project metadata.');
-      setLoading(false);
-      return;
-    }
+    if (useIframeMode) return;
+    if (!canvasRef.current || !urls?.loader) return;
 
-    console.log('[UnityViewer] Initializing Unity WebGL runtime with URLs:', {
-      loaderUrl,
-      frameworkUrl: urls.framework,
-      dataUrl: urls.data,
-      wasmUrl: urls.wasm,
-    });
+    console.log('[UnityViewer] Initializing Unity WebGL runtime with URLs:', urls);
+
+    let progressTimer: NodeJS.Timeout | null = null;
 
     loadUnityInstance(canvasRef.current, {
-      loaderUrl: loaderUrl,
+      loaderUrl: urls.loader,
       frameworkUrl: urls.framework || '',
       dataUrl: urls.data || '',
       wasmUrl: urls.wasm || '',
       onProgress: (p) => {
         const pct = Math.round(p * 100);
         setProgress(pct);
+        if (pct >= 90 && !progressTimer) {
+          // If WASM compilation finishes at 90%, smoothly transition to 100%
+          progressTimer = setTimeout(() => {
+            setProgress(100);
+            setLoading(false);
+          }, 1500);
+        }
       },
     })
       .then((instance) => {
@@ -63,12 +62,22 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
         setLoading(false);
       })
       .catch((err) => {
-        const errorMsg = typeof err === 'string' ? err : err?.message || JSON.stringify(err) || 'Failed to stream Unity WebGL build files.';
-        console.error('[UnityViewer DEBUG ERROR]:', err);
+        const errorMsg = err?.message || 'Failed to stream Unity WebGL build files.';
+        console.error('[UnityViewer DEBUG ERROR]:', {
+          error: err,
+          loaderUrl: urls.loader,
+          frameworkUrl: urls.framework,
+          dataUrl: urls.data,
+          wasmUrl: urls.wasm,
+        });
         setLoadError(errorMsg);
         setLoading(false);
       });
-  }, [urls]);
+
+    return () => {
+      if (progressTimer) clearTimeout(progressTimer);
+    };
+  }, [urls, useIframeMode]);
 
   const handleStartPlay = () => {
     setIsPlaying(true);
@@ -114,6 +123,21 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
     }
   };
 
+  // Option 1: Serve Creator's exact index.html if uploaded with index.html
+  if (useIframeMode && urls?.indexUrl) {
+    return (
+      <div ref={containerRef} className="relative w-full h-full min-h-[580px] bg-slate-950 rounded-2xl overflow-hidden border border-border/60 shadow-vr">
+        <iframe
+          src={urls.indexUrl}
+          className="w-full h-full min-h-[580px] border-0"
+          allow="autoplay; fullscreen; vr; xr-spatial-tracking"
+          title={projectTitle || 'Unity WebGL Build'}
+        />
+      </div>
+    );
+  }
+
+  // Option 2: Execute createUnityInstance directly on canvas
   return (
     <div
       ref={containerRef}

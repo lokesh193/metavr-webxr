@@ -3,7 +3,6 @@ import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import fs from 'fs';
 import { logger } from '../utils/logger';
-import { uploadToSupabaseStorage } from './supabaseStorage';
 
 const R2_ENDPOINT = process.env.R2_ENDPOINT;
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
@@ -25,7 +24,7 @@ if (R2_ENDPOINT && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY) {
     });
     logger.info('Cloudflare R2 / AWS S3 Client initialized successfully');
   } catch (err) {
-    logger.warn('Failed to initialize S3 client, falling back to Supabase/local storage', err);
+    logger.warn('Failed to initialize S3 client, falling back to local file storage', err);
   }
 }
 
@@ -39,7 +38,6 @@ export async function uploadFile(
   const fileName = `${Date.now()}-${uuidv4()}${fileExt}`;
   const key = `${folder}/${fileName}`;
 
-  // 1. Check Cloudflare R2 / S3 Storage
   if (s3Client) {
     try {
       const command = new PutObjectCommand({
@@ -55,22 +53,11 @@ export async function uploadFile(
         url: `${CDN_URL}/${key}`,
       };
     } catch (error) {
-      logger.error('S3 upload failed, trying Supabase storage fallback:', error);
+      logger.error('S3 upload failed, using local storage fallback:', error);
     }
   }
 
-  // 2. Check 100% Free Supabase Cloud Storage
-  try {
-    const supabaseRes = await uploadToSupabaseStorage(buffer, originalName, mimeType, folder);
-    if (supabaseRes?.url) {
-      logger.info(`[StorageService] Uploaded to free Supabase Cloud Storage: ${supabaseRes.url}`);
-      return supabaseRes;
-    }
-  } catch (supabaseErr) {
-    logger.warn('[StorageService] Supabase storage fallback error, saving to local disk:', supabaseErr);
-  }
-
-  // 3. Local Disk Storage Fallback
+  // Local Storage Fallback
   const uploadsDir = path.join(__dirname, '../../uploads', folder);
   if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });

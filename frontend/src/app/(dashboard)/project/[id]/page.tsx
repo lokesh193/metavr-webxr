@@ -2,39 +2,15 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { Canvas } from '@react-three/fiber';
 import { apiClient } from '@/lib/api-client';
-import { supabase } from '@/lib/supabase-client';
 import { Project } from '@/types';
 import { VRButton } from '@/components/webxr/VRButton';
 import { ModelViewer } from '@/components/viewer/ModelViewer';
 import { UnityViewer } from '@/components/viewer/UnityViewer';
 import { ProjectCardMenu } from '@/components/ui/ProjectCardMenu';
-import { Heart, Eye, MessageSquare, Send, RotateCw, Layers, ArrowLeft, UploadCloud } from 'lucide-react';
+import { Heart, Eye, MessageSquare, Send, Sparkles, Shield, RotateCw, Layers } from 'lucide-react';
 import { toast } from 'sonner';
-
-const SUPABASE_URL = 'https://sswulpqcabktapawrkpu.supabase.co';
-
-async function listAllStorageFiles(prefix: string): Promise<string[]> {
-  const paths: string[] = [];
-  try {
-    const { data: items } = await supabase.storage.from('webxr-assets').list(prefix, { limit: 100 });
-    if (items) {
-      for (const item of items) {
-        const fullPath = `${prefix}/${item.name}`;
-        if (!item.id || item.id === null) {
-          // Subfolder: search recursively
-          const subPaths = await listAllStorageFiles(fullPath);
-          paths.push(...subPaths);
-        } else {
-          paths.push(fullPath);
-        }
-      }
-    }
-  } catch (e) {}
-  return paths;
-}
 
 export default function ProjectDetailPage() {
   const params = useParams();
@@ -58,68 +34,12 @@ export default function ProjectDetailPage() {
   const fetchProjectDetail = async () => {
     setLoading(true);
     try {
-      // 1. Primary: Direct query from Supabase PostgreSQL Project table
-      const { data: supaProject, error: supaErr } = await supabase
-        .from('Project')
-        .select('*')
-        .eq('id', projectId)
-        .single();
-
-      if (supaProject && !supaErr) {
-        let unityUrls = supaProject.unityUrls;
-        if (typeof unityUrls === 'string') {
-          try {
-            unityUrls = JSON.parse(unityUrls);
-          } catch (e) {}
-        }
-
-        // Auto-reconstruct unityUrls recursively from Supabase Storage if missing or incomplete
-        if (
-          supaProject.type === 'UNITY' &&
-          (!unityUrls || !unityUrls.loader || Object.keys(unityUrls).length === 0)
-        ) {
-          console.log('[ProjectDetailPage] Auto-discovering nested Unity URLs from Storage bucket for:', projectId);
-          const allFilePaths = await listAllStorageFiles(`projects/${projectId}`);
-
-          if (allFilePaths.length > 0) {
-            const reconstructed: any = {};
-            for (const path of allFilePaths) {
-              const lower = path.toLowerCase();
-              const pubUrl = `${SUPABASE_URL}/storage/v1/object/public/webxr-assets/${path}`;
-              if (lower.endsWith('.loader.js')) reconstructed.loader = pubUrl;
-              else if (lower.includes('framework.js')) reconstructed.framework = pubUrl;
-              else if (lower.endsWith('.data')) reconstructed.data = pubUrl;
-              else if (lower.endsWith('.wasm')) reconstructed.wasm = pubUrl;
-              else if (lower.endsWith('index.html')) reconstructed.indexUrl = pubUrl;
-            }
-            unityUrls = reconstructed;
-
-            // Persist reconstructed URLs back to DB for instant future loads
-            if (unityUrls && unityUrls.loader) {
-              await supabase
-                .from('Project')
-                .update({ unityUrls: JSON.stringify(unityUrls) })
-                .eq('id', projectId);
-            }
-          }
-        }
-
-        setProject({
-          ...supaProject,
-          unityUrls,
-        });
-        setLikesCount(supaProject.likesCount || 0);
-        setLoading(false);
-        return;
-      }
-
-      // 2. Secondary fallback: Next.js API route /api/projects/[id]
       const { data } = await apiClient.get(`/projects/${projectId}`);
       setProject(data);
       setIsLiked(!!data.isLiked);
       setLikesCount(data.likesCount || 0);
     } catch (err) {
-      console.error('[ProjectDetailPage] Load error:', err);
+      console.error(err);
       toast.error('Failed to load project detail');
     } finally {
       setLoading(false);
@@ -169,20 +89,7 @@ export default function ProjectDetailPage() {
   }
 
   if (!project) {
-    return (
-      <div className="max-w-7xl mx-auto px-6 py-24 text-center space-y-5">
-        <h2 className="text-2xl font-extrabold text-white">Project Not Found</h2>
-        <p className="text-xs text-slate-400 max-w-md mx-auto">
-          The project ID you are trying to view was deleted or does not exist on the database.
-        </p>
-        <Link
-          href="/projects"
-          className="inline-flex items-center gap-2 px-6 py-3 bg-primary hover:bg-primary-glow text-white text-xs font-extrabold rounded-xl shadow-vr transition"
-        >
-          <ArrowLeft className="w-4 h-4" /> Return to Showcase Catalog
-        </Link>
-      </div>
-    );
+    return <div className="max-w-7xl mx-auto px-6 py-20 text-center text-red-400">Project not found</div>;
   }
 
   return (
@@ -253,21 +160,11 @@ export default function ProjectDetailPage() {
               </button>
             </div>
           </>
-        ) : project.type === 'UNITY' && project.unityUrls && project.unityUrls.loader ? (
+        ) : project.type === 'UNITY' && project.unityUrls ? (
           <UnityViewer urls={project.unityUrls} projectTitle={project.title} />
         ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center text-center p-8 space-y-4 bg-slate-950">
-            <UploadCloud className="w-12 h-12 text-cyan-400 animate-bounce" />
-            <h3 className="text-xl font-bold text-white">Incomplete Legacy Project Build</h3>
-            <p className="text-xs text-slate-400 max-w-md">
-              This legacy test record was created during an earlier test upload before the WebGL WASM pipeline completed. Please upload a fresh Unity build.
-            </p>
-            <Link
-              href="/upload"
-              className="px-6 py-3 bg-primary hover:bg-primary-glow text-white text-xs font-extrabold rounded-xl shadow-vr transition"
-            >
-              Upload Fresh Unity WebGL Build
-            </Link>
+          <div className="w-full h-full flex items-center justify-center text-slate-400">
+            3D Preview binary processing...
           </div>
         )}
       </div>
@@ -317,7 +214,7 @@ export default function ProjectDetailPage() {
               value={commentText}
               onChange={(e) => setCommentText(e.target.value)}
               placeholder="Write a comment about this WebXR experience..."
-              className="flex-1 bg-slate-950 border border-border/80 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-primary"
+              className="flex-1 bg-slate-900 border border-border/80 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-primary"
             />
             <button
               type="submit"

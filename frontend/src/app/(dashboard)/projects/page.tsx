@@ -3,9 +3,8 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { apiClient } from '@/lib/api-client';
-import { supabase } from '@/lib/supabase-client';
 import { Project } from '@/types';
-import { Search, Glasses, Eye, Heart, Sparkles } from 'lucide-react';
+import { Search, Glasses, Eye, Heart, Filter, Sparkles } from 'lucide-react';
 import { ProjectCardMenu } from '@/components/ui/ProjectCardMenu';
 
 export default function ProjectsPage() {
@@ -21,29 +20,12 @@ export default function ProjectsPage() {
   const fetchProjects = async () => {
     setLoading(true);
     try {
-      // 1. Direct query from Supabase PostgreSQL Project table
-      let query = supabase.from('Project').select('*').order('createdAt', { ascending: false });
-      if (filterType !== 'ALL') {
-        query = query.eq('type', filterType);
-      }
-      const { data: supaProjects, error: supaErr } = await query;
-
-      if (supaProjects && !supaErr && supaProjects.length > 0) {
-        console.log('[ProjectsPage] Raw Supabase query response:', supaProjects);
-        setProjects(supaProjects);
-        setLoading(false);
-        return;
-      }
-
-      // 2. API route fallback
       let url = '/projects';
       if (filterType !== 'ALL') url += `?type=${filterType}`;
       const { data } = await apiClient.get(url);
-      const list = Array.isArray(data) ? data : data?.data || [];
-      console.log('[ProjectsPage] Raw API query response:', list);
-      setProjects(list);
+      setProjects(data.data || []);
     } catch (err) {
-      console.error('[ProjectsPage] Fetch error:', err);
+      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -60,7 +42,7 @@ export default function ProjectsPage() {
   };
 
   const filteredProjects = projects.filter((p) =>
-    (p.title && p.title.toLowerCase().includes(searchQuery.toLowerCase())) ||
+    p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     (p.description && p.description.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
@@ -165,8 +147,8 @@ export default function ProjectsPage() {
                 </Link>
 
                 <div className="flex items-center justify-between text-xs text-slate-400 pt-3 border-t border-white/5">
-                  <span className="flex items-center gap-1"><Eye className="w-4 h-4 text-cyan-400" /> {project.views || 0} views</span>
-                  <span className="flex items-center gap-1"><Heart className="w-4 h-4 text-rose-400" /> {project.likesCount || 0}</span>
+                  <span className="flex items-center gap-1"><Eye className="w-4 h-4 text-cyan-400" /> {project.views} views</span>
+                  <span className="flex items-center gap-1"><Heart className="w-4 h-4 text-rose-400" /> {project.likesCount}</span>
                 </div>
               </div>
             </div>
