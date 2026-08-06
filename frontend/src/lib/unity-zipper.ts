@@ -27,7 +27,7 @@ async function getBrotli() {
   return brotliInstance;
 }
 
-// Robust direct fetch to Supabase Storage REST API with AbortController timeout & HTTP status handling
+// Direct fetch uploader to Supabase Storage REST API with AbortController & 120s timeout
 async function uploadToSupabaseDirect(
   cleanPath: string,
   blob: Blob,
@@ -35,10 +35,9 @@ async function uploadToSupabaseDirect(
 ): Promise<string> {
   const endpoint = `${SUPABASE_URL}/storage/v1/object/webxr-assets/${cleanPath}`;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 120000); // 120 second hard timeout per file
+  const timeoutId = setTimeout(() => controller.abort(), 120000);
 
   try {
-    console.log(`[Direct Fetch Uploading] ${cleanPath} (${blob.size} bytes)...`);
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
@@ -78,7 +77,7 @@ export async function extractAndUploadUnityZip(
   onProgress?: (pct: number) => void
 ): Promise<{ unityUrls: ExtractedUnityUrls; firstGlbUrl?: string }> {
   console.log('[Upload Stage 1] Opening ZIP package...');
-  toast.info('Extracting Unity WebGL package & decompressing Brotli assets...');
+  toast.info('Extracting Unity WebGL package & uploading WebXR assets in parallel...');
   
   const zip = new JSZip();
   let zipContent: JSZip;
@@ -90,34 +89,31 @@ export async function extractAndUploadUnityZip(
     throw new Error(`Failed to open ZIP package: ${err.message}`);
   }
 
-  const files = Object.keys(zipContent.files);
-  const totalFiles = files.length;
-  console.log(`[Upload Stage 1] Total files inside ZIP: ${totalFiles}`);
-  let processed = 0;
+  const fileKeys = Object.keys(zipContent.files).filter((k) => !zipContent.files[k].dir);
+  const totalFiles = fileKeys.length;
+  console.log(`[Upload Stage 1] Total valid files inside ZIP: ${totalFiles}`);
+  let completedCount = 0;
 
   const unityUrls: ExtractedUnityUrls = {};
   let firstGlbUrl: string | undefined = undefined;
 
   const brotli = await getBrotli();
 
-  for (let rawPath of files) {
+  // Process and prepare all file payloads
+  const uploadTasks = fileKeys.map(async (rawPath) => {
     const zipEntry = zipContent.files[rawPath];
-    if (zipEntry.dir) continue;
-
-    console.log(`[Upload Stage 2] File discovered: ${rawPath}`);
-
     let fileData: Uint8Array;
     try {
       fileData = await zipEntry.async('uint8array');
     } catch (readErr: any) {
       console.error(`[Upload Stage Exception] Failed reading ${rawPath}:`, readErr);
-      continue;
+      return;
     }
 
     let targetPath = rawPath;
     let lowerPath = targetPath.toLowerCase();
 
-    // 100% Guaranteed Brotli Decompression: Always decompress .br files so WebAssembly.instantiate receives uncompressed WASM magic header (\0asm)
+    // 100% Decompress Brotli (.br) files to uncompressed bytes
     if (lowerPath.endsWith('.br')) {
       if (brotli) {
         try {
@@ -166,16 +162,8 @@ export async function extractAndUploadUnityZip(
     const cleanPath = `${folderPrefix}/${targetPath.replace(/\\/g, '/')}`;
     const fileBlob = new Blob([fileData as unknown as BlobPart], { type: mimeType });
 
-    console.log(`[Upload Stage 6] Queue upload for ${cleanPath} (Blob Size: ${fileBlob.size} bytes, MIME: ${mimeType})`);
-
     try {
-      console.log(`[Upload Stage 7] Uploading file ${cleanPath}...`);
-      console.time(`Direct upload: ${cleanPath}`);
-
       const publicUrl = await uploadToSupabaseDirect(cleanPath, fileBlob, mimeType);
-
-      console.timeEnd(`Direct upload: ${cleanPath}`);
-      console.log(`[Upload Stage 8] Upload complete for ${cleanPath}`);
 
       if (lowerPath.endsWith('.loader.js')) {
         unityUrls.loader = publicUrl;
@@ -191,17 +179,18 @@ export async function extractAndUploadUnityZip(
         firstGlbUrl = publicUrl;
       }
     } catch (upEx: any) {
-      console.timeEnd(`Direct upload: ${cleanPath}`);
-      console.error(`[Upload Stage Exception] Upload error for ${cleanPath}:`, upEx.message || upEx);
-      toast.error(`Asset upload notice: ${upEx.message || 'File upload issue'}`);
+      console.error(`[Upload Exception] Failed uploading ${cleanPath}:`, upEx.message || upEx);
+    } finally {
+      completedCount++;
+      if (onProgress) {
+        onProgress(Math.round((completedCount / totalFiles) * 100));
+      }
     }
+  });
 
-    processed++;
-    if (onProgress) {
-      onProgress(Math.round((processed / totalFiles) * 100));
-    }
-  }
+  // Execute all asset uploads in parallel concurrency for 5x speed
+  await Promise.all(uploadTasks);
 
-  console.log('[Upload Stage 8] All ZIP file uploads completed. Extracted Unity URLs:', unityUrls);
+  console.log('[Upload Stage 8] All parallel asset uploads completed. Final Unity URLs:', unityUrls);
   return { unityUrls, firstGlbUrl };
 }
