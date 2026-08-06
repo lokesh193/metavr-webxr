@@ -14,6 +14,7 @@
     "@react-three/xr": "^5.7.1",
     "@supabase/supabase-js": "^2.112.1",
     "axios": "^1.6.7",
+    "brotli-wasm": "^3.0.1",
     "clsx": "^2.1.0",
     "jszip": "^3.10.1",
     "lucide-react": "^0.344.0",
