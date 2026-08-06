@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase-client';
 import { apiClient } from '@/lib/api-client';
+import { extractAndUploadUnityZip } from '@/lib/unity-zipper';
 import { toast } from 'sonner';
 
 export function useUpload() {
@@ -14,60 +15,81 @@ export function useUpload() {
       const primaryFile = files[0];
       if (!primaryFile) throw new Error('No files provided for upload.');
 
-      const isUnity = primaryFile.name.endsWith('.zip') || primaryFile.name.endsWith('.unitypackage');
-      const projectType = isUnity ? 'UNITY' : 'MODEL';
-      const cleanFileName = `${Date.now()}_${primaryFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-      const filePath = `projects/${cleanFileName}`;
+      const isZip = primaryFile.name.endsWith('.zip');
+      const isUnityPkg = primaryFile.name.endsWith('.unitypackage');
+      const projectType = isZip || isUnityPkg ? 'UNITY' : 'MODEL';
 
-      toast.info('Uploading asset directly to Supabase Cloud Storage...');
+      const projectId = `proj_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const folderPrefix = `projects/${projectId}`;
 
-      // 1. Upload file directly to Supabase Storage over HTTPS
-      const { data: uploadData, error: uploadErr } = await supabase.storage
-        .from('webxr-assets')
-        .upload(filePath, primaryFile, {
-          upsert: true,
-          contentType: primaryFile.type || 'application/octet-stream',
-        });
+      let finalGlbUrl: string | null = null;
+      let unityUrlsObj: any = null;
+      let primaryPublicUrl: string | null = null;
 
-      if (uploadErr) {
-        throw new Error(`Cloud storage upload error: ${uploadErr.message}`);
+      if (isZip) {
+        // Extract ZIP build in browser and upload each extracted file (loader, framework, data, wasm) to Supabase Storage
+        const { unityUrls, firstGlbUrl } = await extractAndUploadUnityZip(
+          primaryFile,
+          folderPrefix,
+          (pct) => setProgress(pct)
+        );
+
+        unityUrlsObj = unityUrls;
+        if (firstGlbUrl) finalGlbUrl = firstGlbUrl;
+      } else {
+        // Upload single 3D GLB model or asset file
+        toast.info('Uploading asset directly to Supabase Cloud Storage...');
+        const cleanFileName = `${Date.now()}_${primaryFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+        const filePath = `${folderPrefix}/${cleanFileName}`;
+
+        const { data: uploadData, error: uploadErr } = await supabase.storage
+          .from('webxr-assets')
+          .upload(filePath, primaryFile, {
+            upsert: true,
+            contentType: primaryFile.type || 'application/octet-stream',
+          });
+
+        if (uploadErr) {
+          throw new Error(`Cloud storage upload error: ${uploadErr.message}`);
+        }
+
+        const { data: urlData } = supabase.storage
+          .from('webxr-assets')
+          .getPublicUrl(filePath);
+
+        primaryPublicUrl = urlData?.publicUrl || `https://sswulpqcabktapawrkpu.supabase.co/storage/v1/object/public/webxr-assets/${filePath}`;
+        finalGlbUrl = primaryPublicUrl;
+        setProgress(100);
       }
 
-      // 2. Get public HTTPS URL from Supabase Storage
-      const { data: urlData } = supabase.storage
-        .from('webxr-assets')
-        .getPublicUrl(filePath);
+      const stringifiedUnityUrls = unityUrlsObj && Object.keys(unityUrlsObj).length > 0
+        ? JSON.stringify(unityUrlsObj)
+        : null;
 
-      const publicUrl = urlData?.publicUrl || `https://sswulpqcabktapawrkpu.supabase.co/storage/v1/object/public/webxr-assets/${filePath}`;
-      setProgress(100);
-
-      // 3. Insert project record into Supabase Database
-      const projectId = `proj_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      const unityUrlsObj = isUnity ? JSON.stringify({ indexUrl: publicUrl, loader: publicUrl }) : null;
-
+      // Insert extracted project metadata into Supabase Project database table
       try {
         const { error: dbErr } = await supabase.from('Project').insert({
           id: projectId,
           title: title || primaryFile.name.replace(/\.[^/.]+$/, ''),
-          description: description || 'Uploaded WebXR asset via Supabase Cloud Storage',
+          description: description || 'Extracted Unity WebGL / WebXR Build',
           userId: 'user_demo_creator_123',
           type: projectType,
-          glbUrl: isUnity ? null : publicUrl,
-          unityUrls: unityUrlsObj,
+          glbUrl: finalGlbUrl,
+          unityUrls: stringifiedUnityUrls,
           thumbnail: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
           status: 'READY',
         });
 
         if (dbErr) {
           console.warn('[useUpload] Supabase Table insert notice:', dbErr.message);
-          // Fallback sync via API client if Supabase RLS or table name differs
+          // Fallback sync via API client route
           await apiClient.post('/projects', {
             id: projectId,
             title: title || primaryFile.name.replace(/\.[^/.]+$/, ''),
-            description: description || 'Uploaded WebXR asset via Supabase Cloud Storage',
+            description: description || 'Extracted Unity WebGL / WebXR Build',
             type: projectType,
-            glbUrl: isUnity ? null : publicUrl,
-            unityUrls: isUnity ? { indexUrl: publicUrl, loader: publicUrl } : null,
+            glbUrl: finalGlbUrl,
+            unityUrls: unityUrlsObj,
             thumbnail: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
           });
         }
@@ -75,8 +97,8 @@ export function useUpload() {
         console.warn('[useUpload] Database sync fallback notice:', syncErr);
       }
 
-      toast.success('Asset uploaded and stored successfully!');
-      return { projectId, publicUrl };
+      toast.success('Unity WebGL package extracted and launched for WebXR successfully!');
+      return { projectId, unityUrls: unityUrlsObj };
     } catch (error: any) {
       const msg = error.message || 'Upload processing failed';
       toast.error(msg);
