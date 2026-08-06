@@ -27,33 +27,26 @@ async function getBrotli() {
   return brotliInstance;
 }
 
-// Ultra-fast direct REST uploader to Supabase Storage with Cache-Control & Content-Encoding support
+// Ultra-fast direct REST uploader to Supabase Storage with Cache-Control support
 async function uploadToSupabaseDirect(
   cleanPath: string,
   blob: Blob,
-  mimeType: string,
-  contentEncoding?: string
+  mimeType: string
 ): Promise<string> {
   const endpoint = `${SUPABASE_URL}/storage/v1/object/webxr-assets/${cleanPath}`;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 120000);
 
-  const headers: Record<string, string> = {
-    'Authorization': `Bearer ${SUPABASE_KEY}`,
-    'apikey': SUPABASE_KEY,
-    'Content-Type': mimeType,
-    'x-upsert': 'true',
-    'cache-control': 'public, max-age=31536000, immutable',
-  };
-
-  if (contentEncoding) {
-    headers['Content-Encoding'] = contentEncoding;
-  }
-
   try {
     const response = await fetch(endpoint, {
       method: 'POST',
-      headers,
+      headers: {
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'apikey': SUPABASE_KEY,
+        'Content-Type': mimeType,
+        'x-upsert': 'true',
+        'cache-control': 'public, max-age=31536000, immutable',
+      },
       body: blob,
       signal: controller.signal,
     });
@@ -85,7 +78,7 @@ export async function extractAndUploadUnityZip(
   onProgress?: (pct: number) => void
 ): Promise<{ unityUrls: ExtractedUnityUrls; firstGlbUrl?: string }> {
   console.log('[Upload Stage 1] Opening ZIP package...');
-  toast.info('Extracting Unity WebGL package & optimizing WebXR assets for high speed streaming...');
+  toast.info('Extracting Unity WebGL package & decompressing WASM binaries...');
   
   const zip = new JSZip();
   let zipContent: JSZip;
@@ -107,7 +100,7 @@ export async function extractAndUploadUnityZip(
 
   const brotli = await getBrotli();
 
-  // Process and upload all ZIP files concurrently with single-pass optimization
+  // Process and upload all ZIP files concurrently
   const uploadTasks = fileKeys.map(async (rawPath) => {
     const zipEntry = zipContent.files[rawPath];
     let fileData: Uint8Array;
@@ -120,23 +113,33 @@ export async function extractAndUploadUnityZip(
 
     let targetPath = rawPath;
     let lowerPath = targetPath.toLowerCase();
-    let contentEncoding: string | undefined = undefined;
 
-    // Decompress Brotli (.br) files safely
+    // 100% Decompress Brotli (.br) files to uncompressed bytes (strips .br extension)
     if (lowerPath.endsWith('.br')) {
       if (brotli) {
         try {
           const decompressed = brotli.decompress(fileData);
           fileData = new Uint8Array(decompressed);
-          targetPath = targetPath.slice(0, -3); // Strip .br extension
+          targetPath = targetPath.slice(0, -3); // Strip .br extension (e.g. MyVRWebBuild.wasm.br -> MyVRWebBuild.wasm)
           lowerPath = targetPath.toLowerCase();
-          console.log(`[Upload Stage Decompress Success] ${targetPath} (${fileData.byteLength} bytes)`);
+          console.log(`[Upload Stage Decompress Success] ${targetPath} (${fileData.byteLength} bytes, Magic Header: ${fileData[0].toString(16)} ${fileData[1].toString(16)} ${fileData[2].toString(16)} ${fileData[3].toString(16)})`);
         } catch (brErr: any) {
           console.warn(`[Upload Stage Exception] Brotli decompression fallback notice for ${targetPath}:`, brErr);
-          contentEncoding = 'br';
         }
-      } else {
-        contentEncoding = 'br';
+      }
+    } else if (lowerPath.endsWith('.gz') && typeof DecompressionStream !== 'undefined') {
+      try {
+        const ds = new DecompressionStream('gzip');
+        const writer = ds.writable.getWriter();
+        writer.write(fileData as unknown as BufferSource);
+        writer.close();
+        const decompressedArray = await new Response(ds.readable).arrayBuffer();
+        fileData = new Uint8Array(decompressedArray);
+        targetPath = targetPath.slice(0, -3);
+        lowerPath = targetPath.toLowerCase();
+        console.log(`[Upload Stage Decompress Success] Gzip ${targetPath} (${fileData.byteLength} bytes)`);
+      } catch (gzErr: any) {
+        console.warn(`[Upload Stage Exception] Gzip decompression fallback notice for ${targetPath}:`, gzErr);
       }
     }
 
@@ -161,7 +164,7 @@ export async function extractAndUploadUnityZip(
     const fileBlob = new Blob([fileData as unknown as BlobPart], { type: mimeType });
 
     try {
-      const publicUrl = await uploadToSupabaseDirect(cleanPath, fileBlob, mimeType, contentEncoding);
+      const publicUrl = await uploadToSupabaseDirect(cleanPath, fileBlob, mimeType);
 
       if (lowerPath.endsWith('.loader.js')) {
         unityUrls.loader = publicUrl;
