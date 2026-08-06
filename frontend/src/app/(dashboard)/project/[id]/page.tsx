@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Canvas } from '@react-three/fiber';
 import { apiClient } from '@/lib/api-client';
 import { Project } from '@/types';
@@ -9,7 +10,7 @@ import { VRButton } from '@/components/webxr/VRButton';
 import { ModelViewer } from '@/components/viewer/ModelViewer';
 import { UnityViewer } from '@/components/viewer/UnityViewer';
 import { ProjectCardMenu } from '@/components/ui/ProjectCardMenu';
-import { Heart, Eye, MessageSquare, Send, Sparkles, Shield, RotateCw, Layers } from 'lucide-react';
+import { Heart, Eye, MessageSquare, Send, RotateCw, Layers, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function ProjectDetailPage() {
@@ -89,7 +90,20 @@ export default function ProjectDetailPage() {
   }
 
   if (!project) {
-    return <div className="max-w-7xl mx-auto px-6 py-20 text-center text-red-400">Project not found</div>;
+    return (
+      <div className="max-w-7xl mx-auto px-6 py-24 text-center space-y-5">
+        <h2 className="text-2xl font-extrabold text-white">Project Not Found</h2>
+        <p className="text-xs text-slate-400 max-w-md mx-auto">
+          The project ID you are trying to view was deleted or does not exist on the database.
+        </p>
+        <Link
+          href="/projects"
+          className="inline-flex items-center gap-2 px-6 py-3 bg-primary hover:bg-primary-glow text-white text-xs font-extrabold rounded-xl shadow-vr transition"
+        >
+          <ArrowLeft className="w-4 h-4" /> Return to Showcase Catalog
+        </Link>
+      </div>
+    );
   }
 
   return (
