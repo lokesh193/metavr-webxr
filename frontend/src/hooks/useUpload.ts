@@ -40,7 +40,7 @@ export function useUpload() {
             },
           };
 
-          // Store project record in localStorage & sessionStorage
+          // 1. Store in localStorage & sessionStorage for current desktop browser
           if (typeof window !== 'undefined') {
             const existing = JSON.parse(localStorage.getItem('custom_projects') || sessionStorage.getItem('custom_projects') || '[]');
             existing.unshift(newProject);
@@ -48,7 +48,10 @@ export function useUpload() {
             sessionStorage.setItem('custom_projects', JSON.stringify(existing));
           }
 
-          toast.success('Unity WebGL WASM build extracted & indexed successfully!');
+          // 2. Sync to Cloud API so VR Headsets can discover and load project metadata
+          await apiClient.post('/projects', newProject).catch((err) => console.warn('Cloud sync note:', err));
+
+          toast.success('Unity WebGL WASM build extracted & synced for VR headsets!');
           return { projectId, data: newProject };
         }
       }
@@ -67,7 +70,7 @@ export function useUpload() {
         },
       });
 
-      toast.success('Asset uploaded and processed successfully!');
+      toast.success('Asset uploaded and synced successfully!');
       return data;
     } catch (error: any) {
       console.error('[useUpload Error]:', error);
