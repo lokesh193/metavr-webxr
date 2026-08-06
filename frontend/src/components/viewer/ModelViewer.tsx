@@ -2,7 +2,9 @@
 
 import { useRef, useEffect, Suspense, useMemo } from 'react';
 import { OrbitControls, useGLTF, useFBX, Float } from '@react-three/drei';
+import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
+import { useVRStore } from '@/hooks/useVR';
 
 interface ModelViewerProps {
   glbUrl: string;
@@ -10,6 +12,44 @@ interface ModelViewerProps {
   isVRMode?: boolean;
   wireframe?: boolean;
   autoRotate?: boolean;
+}
+
+function WebXRManager() {
+  const { gl } = useThree();
+  const { isPresenting, setIsPresenting } = useVRStore();
+
+  useEffect(() => {
+    if (!gl) return;
+    gl.xr.enabled = true;
+
+    if (isPresenting) {
+      if ((window as any).__XR_SESSION__) {
+        const session = (window as any).__XR_SESSION__;
+        gl.xr.setSession(session);
+        session.addEventListener('end', () => {
+          setIsPresenting(false);
+          (window as any).__XR_SESSION__ = null;
+        });
+      } else if (navigator.xr) {
+        (navigator as any).xr
+          .requestSession('immersive-vr', {
+            requiredFeatures: ['local-floor'],
+            optionalFeatures: ['hand-tracking'],
+          })
+          .then((session: any) => {
+            (window as any).__XR_SESSION__ = session;
+            gl.xr.setSession(session);
+            session.addEventListener('end', () => {
+              setIsPresenting(false);
+              (window as any).__XR_SESSION__ = null;
+            });
+          })
+          .catch((err: any) => console.warn('WebXR requestSession:', err));
+      }
+    }
+  }, [gl, isPresenting]);
+
+  return null;
 }
 
 // Auto-Fit & Ground-Snap Bounding Box Normalizer for FBX & GLTF Models
@@ -37,7 +77,7 @@ function AutoFitModel({ object, wireframe }: { object: THREE.Object3D; wireframe
       const center = box.getCenter(new THREE.Vector3());
       clone.position.x = -center.x * desiredScale;
       clone.position.z = -center.z * desiredScale;
-      clone.position.y = -box.min.y * desiredScale; // Snap feet / base to ground level!
+      clone.position.y = -box.min.y * desiredScale; // Snap base to y=0 ground level!
     }
 
     clone.traverse((child) => {
@@ -83,6 +123,8 @@ export function ModelViewer({
 
   return (
     <>
+      <WebXRManager />
+
       {/* Studio Lighting Setup */}
       <ambientLight intensity={1.2} />
       <hemisphereLight args={['#ffffff', '#1e293b', 1.0]} />

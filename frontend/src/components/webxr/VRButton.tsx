@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Glasses, Loader2, Monitor, AlertCircle } from 'lucide-react';
+import { Glasses, Loader2, Monitor, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useVRStore } from '@/hooks/useVR';
 import { checkWebXRSupport } from '@/lib/webxr-utils';
 import { Project } from '@/types';
@@ -13,7 +13,7 @@ interface VRButtonProps {
 
 export function VRButton({ project, onLaunchVR }: VRButtonProps) {
   const { isPresenting, setIsPresenting, isLoadingVR, setIsLoadingVR, setProject } = useVRStore();
-  const [xrStatus, setXrStatus] = useState<{ supported: boolean; handTrackingSupported: boolean } | null>(null);
+  const [xrStatus, setXrStatus] = useState<{ supported: boolean; handTrackingSupported: boolean; hardwareName: string } | null>(null);
   const [progress, setProgress] = useState(0);
 
   useEffect(() => {
@@ -22,18 +22,29 @@ export function VRButton({ project, onLaunchVR }: VRButtonProps) {
 
   const handleEnterVR = async () => {
     setIsLoadingVR(true);
-    setProgress(20);
+    setProgress(30);
 
     try {
-      // Set active VR project in store
       setProject(project);
 
-      // Simulate asset preloading progress for smooth WebXR transition
-      await new Promise((r) => setTimeout(r, 400));
-      setProgress(60);
+      await new Promise((r) => setTimeout(r, 200));
+      setProgress(70);
 
-      await new Promise((r) => setTimeout(r, 400));
+      await new Promise((r) => setTimeout(r, 200));
       setProgress(100);
+
+      // Trigger WebXR Immersive Session
+      if (navigator.xr && xrStatus?.supported) {
+        try {
+          const session = await (navigator as any).xr.requestSession('immersive-vr', {
+            requiredFeatures: ['local-floor'],
+            optionalFeatures: ['hand-tracking'],
+          });
+          (window as any).__XR_SESSION__ = session;
+        } catch (err) {
+          console.warn('Direct requestSession note:', err);
+        }
+      }
 
       setIsPresenting(true);
       if (onLaunchVR) onLaunchVR();
@@ -45,6 +56,11 @@ export function VRButton({ project, onLaunchVR }: VRButtonProps) {
   };
 
   const handleExitVR = () => {
+    if ((window as any).__XR_SESSION__) {
+      try {
+        (window as any).__XR_SESSION__.end();
+      } catch (e) {}
+    }
     setIsPresenting(false);
   };
 
@@ -52,44 +68,44 @@ export function VRButton({ project, onLaunchVR }: VRButtonProps) {
     return (
       <button
         onClick={handleExitVR}
-        className="px-8 py-4 bg-red-600 hover:bg-red-700 text-white font-extrabold rounded-2xl shadow-lg flex items-center gap-3 transition transform hover:scale-105"
+        className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-lg flex items-center justify-center gap-2 transition"
       >
-        <Monitor className="w-6 h-6" /> Exit VR Mode
+        <Monitor className="w-4 h-4" /> Exit VR Mode
       </button>
     );
   }
 
   return (
-    <div className="w-full flex flex-col items-center gap-3">
+    <div className="flex flex-col items-start gap-1.5 w-full">
       <button
         onClick={handleEnterVR}
         disabled={isLoadingVR}
-        className="w-full py-4 px-8 bg-gradient-to-r from-primary via-purple-600 to-secondary hover:from-purple-600 hover:to-cyan-500 text-white font-extrabold text-lg rounded-2xl shadow-vr hover:shadow-cyan flex items-center justify-center gap-3 transition-all duration-300 transform hover:-translate-y-1 active:translate-y-0 disabled:opacity-50"
+        className="w-full sm:w-auto px-6 py-3 bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white font-bold text-sm rounded-xl shadow-cyan hover:scale-[1.02] flex items-center justify-center gap-2.5 transition-all duration-200 disabled:opacity-50"
       >
         {isLoadingVR ? (
           <>
-            <Loader2 className="w-6 h-6 animate-spin text-white" />
-            <span>Preloading VR Assets ({progress}%)...</span>
+            <Loader2 className="w-4 h-4 animate-spin text-white" />
+            <span>Launching 6DOF WebXR ({progress}%)...</span>
           </>
         ) : (
           <>
-            <Glasses className="w-7 h-7 text-cyan-300 animate-pulse-slow" />
-            <span>ENTER VR MODE</span>
+            <Glasses className="w-4 h-4 text-cyan-200 animate-pulse" />
+            <span>ENTER IMMERSIVE VR MODE</span>
           </>
         )}
       </button>
 
-      {/* Hardware Status Indicator */}
-      <div className="text-xs text-slate-400 flex items-center gap-2">
+      {/* Clean Status Subtext */}
+      <div className="text-[11px] text-slate-400 flex items-center gap-1.5 pt-0.5">
         {xrStatus?.supported ? (
           <span className="text-emerald-400 font-semibold flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block"></span>
-            WebXR Hardware Detected (Quest / Vive / Index / Vision Pro)
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            {xrStatus.hardwareName} VR Headset Detected (6DOF Stereo Ready)
           </span>
         ) : (
           <span className="text-amber-400 flex items-center gap-1">
             <AlertCircle className="w-3.5 h-3.5" />
-            No VR Headset detected — Click to preview in 3D Browser Fallback
+            Desktop / Mobile Device — Full 3D Interactive GPU Canvas Mode
           </span>
         )}
       </div>

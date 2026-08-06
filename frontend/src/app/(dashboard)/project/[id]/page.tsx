@@ -136,12 +136,12 @@ export default function ProjectDetailPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
-      {/* Title & VR Button Header */}
-      <div className="glass-card p-8 rounded-3xl border border-white/10 flex flex-col md:flex-row md:items-center justify-between gap-6 relative">
-        <div className="space-y-2">
-          <div className="flex items-center gap-3">
-            <span className="px-3 py-1 bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 rounded-full text-xs font-bold uppercase">
+    <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+      {/* Title & Clean VR Trigger Header */}
+      <div className="glass-card p-6 rounded-2xl border border-white/10 flex flex-col md:flex-row md:items-center justify-between gap-6 relative">
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2.5">
+            <span className="px-2.5 py-0.5 bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 rounded-full text-[11px] font-bold uppercase">
               {project.type} WebXR Asset
             </span>
             <span className="text-xs text-slate-400">
@@ -149,8 +149,8 @@ export default function ProjectDetailPage() {
             </span>
           </div>
 
-          <div className="flex items-center gap-4">
-            <h1 className="text-3xl font-extrabold text-white">{project.title}</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-extrabold text-white">{project.title}</h1>
             <ProjectCardMenu
               projectId={project.id}
               currentTitle={project.title}
@@ -160,17 +160,17 @@ export default function ProjectDetailPage() {
             />
           </div>
 
-          <p className="text-slate-400 text-sm">{project.description || 'WebXR 6DOF 3D experience'}</p>
+          <p className="text-slate-400 text-xs">{project.description || 'WebXR 6DOF 3D experience'}</p>
         </div>
 
-        {/* Dedicated Prominent ENTER VR Button */}
-        <div className="w-full md:w-80">
+        {/* Clean Compact VR Button */}
+        <div className="w-full md:w-auto">
           <VRButton project={project} />
         </div>
       </div>
 
       {/* 3D / Unity Viewer Canvas Container */}
-      <div className="relative w-full min-h-[520px] bg-slate-950 rounded-3xl overflow-hidden border border-white/10 shadow-vr">
+      <div className="relative w-full min-h-[500px] h-[580px] bg-slate-950 rounded-2xl overflow-hidden border border-white/10 shadow-vr">
         {project.type === 'MODEL' && project.glbUrl ? (
           <>
             {/* Three.js Canvas */}
@@ -184,10 +184,10 @@ export default function ProjectDetailPage() {
             </Canvas>
 
             {/* Viewer Control Toolbar */}
-            <div className="absolute bottom-6 left-6 z-10 flex items-center gap-3 bg-slate-900/80 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/10 text-xs">
+            <div className="absolute bottom-5 left-5 z-10 flex items-center gap-2.5 bg-slate-900/80 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-white/10 text-xs">
               <button
                 onClick={() => setAutoRotate(!autoRotate)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold transition ${
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-bold transition ${
                   autoRotate ? 'bg-primary text-white' : 'text-slate-400 hover:text-white'
                 }`}
               >
@@ -195,7 +195,7 @@ export default function ProjectDetailPage() {
               </button>
               <button
                 onClick={() => setWireframe(!wireframe)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold transition ${
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg font-bold transition ${
                   wireframe ? 'bg-primary text-white' : 'text-slate-400 hover:text-white'
                 }`}
               >
@@ -213,28 +213,28 @@ export default function ProjectDetailPage() {
       </div>
 
       {/* Grid Details & Comments */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Left Column: Metadata */}
-        <div className="glass-card p-6 rounded-3xl border border-white/10 space-y-6">
-          <div className="flex items-center justify-between pb-4 border-b border-white/5">
+        <div className="glass-card p-5 rounded-2xl border border-white/10 space-y-5">
+          <div className="flex items-center justify-between pb-3 border-b border-white/5">
             <button
               onClick={handleToggleLike}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition ${
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
                 isLiked ? 'bg-rose-500 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
               }`}
             >
-              <Heart className={`w-4 h-4 ${isLiked ? 'fill-white' : ''}`} />
+              <Heart className={`w-3.5 h-3.5 ${isLiked ? 'fill-white' : ''}`} />
               <span>{likesCount} Likes</span>
             </button>
-            <div className="flex items-center gap-2 text-sm text-slate-400">
-              <Eye className="w-4 h-4 text-cyan-400" />
+            <div className="flex items-center gap-1.5 text-xs text-slate-400">
+              <Eye className="w-3.5 h-3.5 text-cyan-400" />
               <span>{project.views} Views</span>
             </div>
           </div>
 
           <div>
-            <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-3">Asset Technical Spec</h3>
-            <ul className="space-y-2 text-xs text-slate-400 font-mono">
+            <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-2.5">Asset Technical Spec</h3>
+            <ul className="space-y-1.5 text-xs text-slate-400 font-mono">
               <li className="flex justify-between"><span>Format:</span> <strong className="text-slate-200">{project.type}</strong></li>
               <li className="flex justify-between"><span>WebXR Refresh:</span> <strong className="text-emerald-400">90 FPS Target</strong></li>
               <li className="flex justify-between"><span>Compression:</span> <strong className="text-cyan-400">Draco Geometry</strong></li>
@@ -244,38 +244,38 @@ export default function ProjectDetailPage() {
         </div>
 
         {/* Right Column: Comments Section */}
-        <div className="md:col-span-2 glass-card p-6 rounded-3xl border border-white/10 space-y-6">
-          <h3 className="text-xl font-extrabold text-white flex items-center gap-2">
-            <MessageSquare className="w-5 h-5 text-primary" />
+        <div className="md:col-span-2 glass-card p-5 rounded-2xl border border-white/10 space-y-5">
+          <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
+            <MessageSquare className="w-4 h-4 text-primary" />
             Community Discussion ({(project.comments || []).length})
           </h3>
 
           {/* Add Comment Form */}
-          <form onSubmit={handleAddComment} className="flex gap-3">
+          <form onSubmit={handleAddComment} className="flex gap-2.5">
             <input
               type="text"
               value={commentText}
               onChange={(e) => setCommentText(e.target.value)}
               placeholder="Write a comment about this WebXR experience..."
-              className="flex-1 bg-slate-900 border border-border/80 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-primary"
+              className="flex-1 bg-slate-900 border border-border/80 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-primary"
             />
             <button
               type="submit"
-              className="px-5 py-3 bg-primary hover:bg-primary-glow text-white font-bold rounded-xl flex items-center gap-2 transition"
+              className="px-4 py-2.5 bg-primary hover:bg-primary-glow text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition"
             >
-              <Send className="w-4 h-4" /> Post
+              <Send className="w-3.5 h-3.5" /> Post
             </button>
           </form>
 
           {/* Comments List */}
-          <div className="space-y-4 pt-2">
+          <div className="space-y-3 pt-1">
             {(project.comments || []).map((comment) => (
-              <div key={comment.id} className="bg-slate-900/60 border border-white/5 p-4 rounded-2xl space-y-1">
-                <div className="flex items-center justify-between text-xs">
+              <div key={comment.id} className="bg-slate-900/60 border border-white/5 p-3.5 rounded-xl space-y-0.5">
+                <div className="flex items-center justify-between text-[11px]">
                   <span className="font-bold text-cyan-300">{comment.user?.name || 'Creator'}</span>
                   <span className="text-slate-500">{new Date(comment.createdAt).toLocaleDateString()}</span>
                 </div>
-                <p className="text-sm text-slate-300 leading-relaxed">{comment.content}</p>
+                <p className="text-xs text-slate-300 leading-relaxed">{comment.content}</p>
               </div>
             ))}
           </div>
