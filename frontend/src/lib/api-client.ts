@@ -5,7 +5,6 @@ function getApiBaseUrl() {
     return process.env.NEXT_PUBLIC_API_URL;
   }
   if (typeof window !== 'undefined') {
-    // Relative /api endpoint works seamlessly on local dev server and Vercel!
     return '/api';
   }
   return 'http://localhost:5000/api';
@@ -16,6 +15,7 @@ export const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 10000,
 });
 
 apiClient.interceptors.request.use(
@@ -30,4 +30,13 @@ apiClient.interceptors.request.use(
     return config;
   },
   (error) => Promise.reject(error)
+);
+
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // Graceful error fallback to prevent unhandled SSR crashes
+    console.warn('[apiClient Warning]:', error?.message || error);
+    return Promise.reject(error);
+  }
 );
