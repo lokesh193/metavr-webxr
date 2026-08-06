@@ -169,9 +169,9 @@ export async function extractAndUploadUnityZip(
         unityUrls.loader = publicUrl;
       } else if (lowerPath.includes('framework.js')) {
         unityUrls.framework = publicUrl;
-      } else if (lowerPath.endsWith('.data')) {
+      } else if (lowerPath.includes('.data')) {
         unityUrls.data = publicUrl;
-      } else if (lowerPath.endsWith('.wasm')) {
+      } else if (lowerPath.includes('.wasm')) {
         unityUrls.wasm = publicUrl;
       } else if (lowerPath.endsWith('index.html')) {
         unityUrls.indexUrl = publicUrl;
