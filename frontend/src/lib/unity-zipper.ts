@@ -121,12 +121,12 @@ export async function processZipClientSide(
   const projectId = `proj_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const zip = await JSZip.loadAsync(file);
 
-  // Dynamic import brotli-wasm strictly on client-side browser context
-  let brotliDecompressor: any = null;
+  // Initialize brotli-wasm decompressor asynchronously
+  let brotli: any = null;
   if (typeof window !== 'undefined') {
     try {
       const brotliModule = await import('brotli-wasm');
-      brotliDecompressor = await brotliModule.default;
+      brotli = await brotliModule.default;
     } catch (e) {
       console.warn('brotli-wasm dynamic import skipped:', e);
     }
@@ -158,11 +158,11 @@ export async function processZipClientSide(
       loaderBlobUrl = URL.createObjectURL(blob);
     } else if (name.includes('.framework.js') || name.includes('.framework.js.br') || name.includes('.framework.js.gz')) {
       let rawBytes = await entry.async('uint8array');
-      if (name.endsWith('.br') && brotliDecompressor) {
+      if (name.endsWith('.br') && brotli && brotli.decompress) {
         try {
-          rawBytes = brotliDecompressor.decompress(rawBytes);
+          rawBytes = brotli.decompress(rawBytes);
         } catch (err) {
-          console.warn('Brotli framework decompress fallback:', err);
+          console.error('Failed to decompress framework.js.br:', err);
         }
       }
       frameworkBuffer = uint8ToArrayBuffer(rawBytes);
@@ -172,11 +172,11 @@ export async function processZipClientSide(
       }
     } else if (name.includes('.data') || name.includes('.data.br') || name.includes('.data.gz')) {
       let rawBytes = await entry.async('uint8array');
-      if (name.endsWith('.br') && brotliDecompressor) {
+      if (name.endsWith('.br') && brotli && brotli.decompress) {
         try {
-          rawBytes = brotliDecompressor.decompress(rawBytes);
+          rawBytes = brotli.decompress(rawBytes);
         } catch (err) {
-          console.warn('Brotli data decompress fallback:', err);
+          console.error('Failed to decompress data.br:', err);
         }
       }
       dataBuffer = uint8ToArrayBuffer(rawBytes);
@@ -186,11 +186,11 @@ export async function processZipClientSide(
       }
     } else if (name.includes('.wasm') || name.includes('.wasm.br') || name.includes('.wasm.gz')) {
       let rawBytes = await entry.async('uint8array');
-      if (name.endsWith('.br') && brotliDecompressor) {
+      if (name.endsWith('.br') && brotli && brotli.decompress) {
         try {
-          rawBytes = brotliDecompressor.decompress(rawBytes);
+          rawBytes = brotli.decompress(rawBytes);
         } catch (err) {
-          console.warn('Brotli WASM decompress fallback:', err);
+          console.error('Failed to decompress wasm.br:', err);
         }
       }
       wasmBuffer = uint8ToArrayBuffer(rawBytes);
