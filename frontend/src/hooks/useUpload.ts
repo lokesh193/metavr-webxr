@@ -21,7 +21,7 @@ export function useUpload() {
 
       toast.info('Uploading asset directly to Supabase Cloud Storage...');
 
-      // Direct upload to Supabase Storage over HTTPS
+      // 1. Upload file directly to Supabase Storage over HTTPS
       const { data: uploadData, error: uploadErr } = await supabase.storage
         .from('webxr-assets')
         .upload(filePath, primaryFile, {
@@ -30,35 +30,52 @@ export function useUpload() {
         });
 
       if (uploadErr) {
-        throw new Error(`Cloud storage upload failed: ${uploadErr.message}`);
+        throw new Error(`Cloud storage upload error: ${uploadErr.message}`);
       }
 
-      // Get public HTTPS URL from Supabase Storage
+      // 2. Get public HTTPS URL from Supabase Storage
       const { data: urlData } = supabase.storage
         .from('webxr-assets')
         .getPublicUrl(filePath);
 
       const publicUrl = urlData?.publicUrl || `https://sswulpqcabktapawrkpu.supabase.co/storage/v1/object/public/webxr-assets/${filePath}`;
-
       setProgress(100);
 
-      // Post project metadata
-      let projectId = `proj_${Date.now()}`;
+      // 3. Insert project record into Supabase Database
+      const projectId = `proj_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const unityUrlsObj = isUnity ? JSON.stringify({ indexUrl: publicUrl, loader: publicUrl }) : null;
+
       try {
-        const { data: projectData } = await apiClient.post('/projects', {
+        const { error: dbErr } = await supabase.from('Project').insert({
+          id: projectId,
           title: title || primaryFile.name.replace(/\.[^/.]+$/, ''),
           description: description || 'Uploaded WebXR asset via Supabase Cloud Storage',
+          userId: 'user_demo_creator_123',
           type: projectType,
           glbUrl: isUnity ? null : publicUrl,
-          unityUrls: isUnity ? { indexUrl: publicUrl, loader: publicUrl } : null,
+          unityUrls: unityUrlsObj,
           thumbnail: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
+          status: 'READY',
         });
-        if (projectData?.id) projectId = projectData.id;
-      } catch (e) {
-        console.warn('[useUpload] API metadata sync notice:', e);
+
+        if (dbErr) {
+          console.warn('[useUpload] Supabase Table insert notice:', dbErr.message);
+          // Fallback sync via API client if Supabase RLS or table name differs
+          await apiClient.post('/projects', {
+            id: projectId,
+            title: title || primaryFile.name.replace(/\.[^/.]+$/, ''),
+            description: description || 'Uploaded WebXR asset via Supabase Cloud Storage',
+            type: projectType,
+            glbUrl: isUnity ? null : publicUrl,
+            unityUrls: isUnity ? { indexUrl: publicUrl, loader: publicUrl } : null,
+            thumbnail: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
+          });
+        }
+      } catch (syncErr) {
+        console.warn('[useUpload] Database sync fallback notice:', syncErr);
       }
 
-      toast.success('Asset uploaded and launched for WebXR successfully!');
+      toast.success('Asset uploaded and stored successfully!');
       return { projectId, publicUrl };
     } catch (error: any) {
       const msg = error.message || 'Upload processing failed';
