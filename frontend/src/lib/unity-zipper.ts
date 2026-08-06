@@ -1,5 +1,4 @@
 import JSZip from 'jszip';
-import brotliWasm from 'brotli-wasm';
 import { supabase } from '@/lib/supabase-client';
 import { toast } from 'sonner';
 
@@ -14,11 +13,13 @@ export interface ExtractedUnityUrls {
 let brotliInstance: any = null;
 
 async function getBrotli() {
+  if (typeof window === 'undefined') return null;
   if (!brotliInstance) {
     try {
-      brotliInstance = await brotliWasm;
+      const brotliModule = await import('brotli-wasm');
+      brotliInstance = await brotliModule.default;
     } catch (e) {
-      console.warn('[unity-zipper] Failed to initialize brotli-wasm:', e);
+      console.warn('[unity-zipper] Dynamic brotli-wasm import notice:', e);
     }
   }
   return brotliInstance;
@@ -50,7 +51,7 @@ export async function extractAndUploadUnityZip(
     let targetPath = rawPath;
     let lowerPath = targetPath.toLowerCase();
 
-    // Approach B: Decompress .br files before upload to guarantee 100% cloud & browser compatibility
+    // Approach B: Decompress .br files in client browser to guarantee 100% cloud & browser compatibility
     if (lowerPath.endsWith('.br') && brotli) {
       try {
         fileData = brotli.decompress(fileData);
