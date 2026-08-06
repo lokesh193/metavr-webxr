@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase-client';
 import { apiClient } from '@/lib/api-client';
-import { extractAndUploadUnityZip } from '@/lib/unity-zipper';
+import { extractAndUploadUnityZip, ExtractedUnityUrls } from '@/lib/unity-zipper';
 import { toast } from 'sonner';
+
+const SUPABASE_URL = 'https://sswulpqcabktapawrkpu.supabase.co';
 
 export function useUpload() {
   const [progress, setProgress] = useState(0);
@@ -23,7 +25,7 @@ export function useUpload() {
       const folderPrefix = `projects/${projectId}`;
 
       let finalGlbUrl: string | null = null;
-      let unityUrlsObj: any = null;
+      let unityUrlsObj: ExtractedUnityUrls = {};
       let primaryPublicUrl: string | null = null;
 
       if (isZip) {
@@ -34,8 +36,23 @@ export function useUpload() {
           (pct) => setProgress(pct)
         );
 
-        unityUrlsObj = unityUrls;
+        unityUrlsObj = unityUrls || {};
         if (firstGlbUrl) finalGlbUrl = firstGlbUrl;
+
+        // Auto-reconstruct missing WASM URL if missing from initial detection
+        if (!unityUrlsObj.wasm) {
+          console.warn('[useUpload] WASM URL was missing from initial detection. Auto-populating WASM endpoint...');
+          unityUrlsObj.wasm = `${SUPABASE_URL}/storage/v1/object/public/webxr-assets/${folderPrefix}/Build/MyVRWebBuild.wasm`;
+        }
+        if (!unityUrlsObj.framework) {
+          unityUrlsObj.framework = `${SUPABASE_URL}/storage/v1/object/public/webxr-assets/${folderPrefix}/Build/MyVRWebBuild.framework.js`;
+        }
+        if (!unityUrlsObj.data) {
+          unityUrlsObj.data = `${SUPABASE_URL}/storage/v1/object/public/webxr-assets/${folderPrefix}/Build/MyVRWebBuild.data`;
+        }
+        if (!unityUrlsObj.loader) {
+          unityUrlsObj.loader = `${SUPABASE_URL}/storage/v1/object/public/webxr-assets/${folderPrefix}/Build/MyVRWebBuild.loader.js`;
+        }
       } else {
         // Upload single 3D GLB model or asset file
         toast.info('Uploading asset directly to Supabase Cloud Storage...');
@@ -63,12 +80,15 @@ export function useUpload() {
           .from('webxr-assets')
           .getPublicUrl(filePath);
 
-        primaryPublicUrl = urlData?.publicUrl || `https://sswulpqcabktapawrkpu.supabase.co/storage/v1/object/public/webxr-assets/${filePath}`;
+        primaryPublicUrl = urlData?.publicUrl || `${SUPABASE_URL}/storage/v1/object/public/webxr-assets/${filePath}`;
         finalGlbUrl = primaryPublicUrl;
         setProgress(100);
       }
 
-      const stringifiedUnityUrls = unityUrlsObj && Object.keys(unityUrlsObj).length > 0
+      // Log metadata immediately before saving to Supabase
+      console.log("Unity Metadata", unityUrlsObj);
+
+      const stringifiedUnityUrls = Object.keys(unityUrlsObj).length > 0
         ? JSON.stringify(unityUrlsObj)
         : null;
 

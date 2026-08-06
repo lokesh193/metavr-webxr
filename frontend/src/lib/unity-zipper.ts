@@ -114,13 +114,13 @@ export async function extractAndUploadUnityZip(
     let targetPath = rawPath;
     let lowerPath = targetPath.toLowerCase();
 
-    // 100% Decompress Brotli (.br) files to uncompressed bytes (strips .br extension)
+    // 100% Decompress Brotli (.br) files to uncompressed bytes (renames MyVRWebBuild.wasm.br -> MyVRWebBuild.wasm)
     if (lowerPath.endsWith('.br')) {
       if (brotli) {
         try {
           const decompressed = brotli.decompress(fileData);
           fileData = new Uint8Array(decompressed);
-          targetPath = targetPath.slice(0, -3); // Strip .br extension (e.g. MyVRWebBuild.wasm.br -> MyVRWebBuild.wasm)
+          targetPath = targetPath.slice(0, -3); // Strip .br extension
           lowerPath = targetPath.toLowerCase();
           console.log(`[Upload Stage Decompress Success] ${targetPath} (${fileData.byteLength} bytes)`);
         } catch (brErr: any) {
@@ -166,19 +166,26 @@ export async function extractAndUploadUnityZip(
     try {
       const publicUrl = await uploadToSupabaseDirect(cleanPath, fileBlob, mimeType);
 
-      // Match URLs using robust path substring matching
+      // Detect Unity files by searching for both uncompressed (.wasm, .data) and compressed (.wasm.br, .data.br)
       const pathLower = cleanPath.toLowerCase();
-      if (pathLower.endsWith('.loader.js')) {
+      const rawLower = rawPath.toLowerCase();
+
+      if (pathLower.endsWith('.loader.js') || rawLower.endsWith('.loader.js')) {
         unityUrls.loader = publicUrl;
-      } else if (pathLower.includes('framework.js')) {
+      }
+      if (pathLower.includes('framework.js') || rawLower.includes('framework.js')) {
         unityUrls.framework = publicUrl;
-      } else if (pathLower.includes('.data')) {
+      }
+      if (pathLower.includes('.data') || rawLower.includes('.data')) {
         unityUrls.data = publicUrl;
-      } else if (pathLower.includes('.wasm')) {
+      }
+      if (pathLower.includes('.wasm') || rawLower.includes('.wasm')) {
         unityUrls.wasm = publicUrl;
-      } else if (pathLower.endsWith('index.html')) {
+      }
+      if (pathLower.endsWith('index.html') || rawLower.endsWith('index.html')) {
         unityUrls.indexUrl = publicUrl;
-      } else if (pathLower.endsWith('.glb') && !firstGlbUrl) {
+      }
+      if ((pathLower.endsWith('.glb') || rawLower.endsWith('.glb')) && !firstGlbUrl) {
         firstGlbUrl = publicUrl;
       }
     } catch (upEx: any) {
@@ -195,10 +202,5 @@ export async function extractAndUploadUnityZip(
   await Promise.all(uploadTasks);
 
   console.log('[Upload Stage 8] All parallel asset uploads completed. Final Unity URLs:', unityUrls);
-
-  if (!unityUrls.loader || !unityUrls.wasm) {
-    console.warn('[unity-zipper] Notice: Missing loader or WASM URL after extraction:', unityUrls);
-  }
-
   return { unityUrls, firstGlbUrl };
 }
