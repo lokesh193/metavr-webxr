@@ -6,20 +6,6 @@ import { toast } from 'sonner';
 
 const SUPABASE_URL = 'https://sswulpqcabktapawrkpu.supabase.co';
 
-// 10-second strict timeout helper
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operationName: string): Promise<T> {
-  let timer: any;
-  const timeoutPromise = new Promise<T>((_, reject) => {
-    timer = setTimeout(() => {
-      reject(new Error(`Timeout error: ${operationName} exceeded ${timeoutMs / 1000}s limit.`));
-    }, timeoutMs);
-  });
-
-  return Promise.race([promise, timeoutPromise]).finally(() => {
-    clearTimeout(timer);
-  });
-}
-
 export function useUpload() {
   const [progress, setProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
@@ -79,20 +65,13 @@ export function useUpload() {
         const cleanFileName = `${Date.now()}_${primaryFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
         const filePath = `${folderPrefix}/${cleanFileName}`;
 
-        const uploadPromise = Promise.resolve(
-          supabase.storage
-            .from('webxr-assets')
-            .upload(filePath, primaryFile, {
-              upsert: true,
-              contentType: primaryFile.type || 'application/octet-stream',
-            })
-        );
+        const { data: uploadData, error: uploadErr } = await supabase.storage
+          .from('webxr-assets')
+          .upload(filePath, primaryFile, {
+            upsert: true,
+            contentType: primaryFile.type || 'application/octet-stream',
+          });
 
-        const { data: uploadData, error: uploadErr } = await withTimeout(
-          uploadPromise,
-          10000,
-          'Single File Upload'
-        );
         console.timeEnd('5. Upload completed');
 
         if (uploadErr) {
@@ -123,42 +102,30 @@ export function useUpload() {
         ? JSON.stringify(unityUrlsObj)
         : null;
 
-      const dbInsertPromise = Promise.resolve(
-        supabase.from('Project').insert({
-          id: projectId,
-          title: title || primaryFile.name.replace(/\.[^/.]+$/, ''),
-          description: description || 'Extracted Unity WebGL / WebXR Build',
-          userId: 'user_demo_creator_123',
-          type: projectType,
-          glbUrl: finalGlbUrl,
-          unityUrls: stringifiedUnityUrls,
-          thumbnail: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
-          status: 'READY',
-        })
-      );
-
-      const { error: dbErr } = await withTimeout(
-        dbInsertPromise,
-        10000,
-        'Project Record Database Insert'
-      );
+      const { error: dbErr } = await supabase.from('Project').insert({
+        id: projectId,
+        title: title || primaryFile.name.replace(/\.[^/.]+$/, ''),
+        description: description || 'Extracted Unity WebGL / WebXR Build',
+        userId: 'user_demo_creator_123',
+        type: projectType,
+        glbUrl: finalGlbUrl,
+        unityUrls: stringifiedUnityUrls,
+        thumbnail: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
+        status: 'READY',
+      });
 
       if (dbErr) {
         console.warn('[Database Warning] Primary insert notice:', dbErr.message);
-        // Fallback sync via API client route with strict 10s timeout
-        await withTimeout(
-          apiClient.post('/projects', {
-            id: projectId,
-            title: title || primaryFile.name.replace(/\.[^/.]+$/, ''),
-            description: description || 'Extracted Unity WebGL / WebXR Build',
-            type: projectType,
-            glbUrl: finalGlbUrl,
-            unityUrls: unityUrlsObj,
-            thumbnail: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
-          }),
-          10000,
-          'Fallback API Project Creation'
-        );
+        // Fallback sync via API client route
+        await apiClient.post('/projects', {
+          id: projectId,
+          title: title || primaryFile.name.replace(/\.[^/.]+$/, ''),
+          description: description || 'Extracted Unity WebGL / WebXR Build',
+          type: projectType,
+          glbUrl: finalGlbUrl,
+          unityUrls: unityUrlsObj,
+          thumbnail: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
+        });
       }
       console.timeEnd('7. Project creation completed');
 

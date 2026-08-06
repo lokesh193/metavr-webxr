@@ -27,29 +27,13 @@ async function getBrotli() {
   return brotliInstance;
 }
 
-// 10-second strict timeout helper
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operationName: string): Promise<T> {
-  let timer: any;
-  const timeoutPromise = new Promise<T>((_, reject) => {
-    timer = setTimeout(() => {
-      reject(new Error(`Timeout error: ${operationName} exceeded ${timeoutMs / 1000}s limit.`));
-    }, timeoutMs);
-  });
-
-  return Promise.race([promise, timeoutPromise]).finally(() => {
-    clearTimeout(timer);
-  });
-}
-
-// High-speed direct REST uploader with strict 10s timeout per file
+// Direct REST uploader without short timeouts (supports large 15-50MB binary files over slow networks)
 async function uploadToSupabaseDirect(
   cleanPath: string,
   blob: Blob,
   mimeType: string
 ): Promise<string> {
   const endpoint = `${SUPABASE_URL}/storage/v1/object/webxr-assets/${cleanPath}`;
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000); // Strict 10-second per-file timeout
 
   try {
     console.log(`[Upload Stage Start] Uploading ${cleanPath} (${blob.size} bytes)...`);
@@ -65,9 +49,7 @@ async function uploadToSupabaseDirect(
         'cache-control': 'public, max-age=31536000, immutable',
       },
       body: blob,
-      signal: controller.signal,
     });
-    clearTimeout(timeoutId);
     console.timeEnd(`Upload: ${cleanPath}`);
 
     if (!response.ok) {
@@ -80,12 +62,7 @@ async function uploadToSupabaseDirect(
     console.log(`[Upload Stage Complete] ${cleanPath}: ${publicUrl}`);
     return publicUrl;
   } catch (err: any) {
-    clearTimeout(timeoutId);
     console.timeEnd(`Upload: ${cleanPath}`);
-    if (err.name === 'AbortError') {
-      console.error(`[Upload Timeout] Storage upload timed out after 10s for ${cleanPath}`);
-      throw new Error(`Storage upload timed out after 10s for ${cleanPath}`);
-    }
     console.error(`[Upload Exception] ${cleanPath}:`, err.message || err);
     throw err;
   }
@@ -104,7 +81,7 @@ export async function extractAndUploadUnityZip(
   const zip = new JSZip();
   let zipContent: JSZip;
   try {
-    zipContent = await withTimeout(zip.loadAsync(zipFile), 10000, 'ZIP Package Reading');
+    zipContent = await zip.loadAsync(zipFile);
     console.timeEnd('1. ZIP extraction completed');
   } catch (err: any) {
     console.timeEnd('1. ZIP extraction completed');
@@ -229,13 +206,13 @@ export async function extractAndUploadUnityZip(
       throw err;
     } finally {
       uploadedCount++;
-      // Smooth progress scaling between 80% and 89%
       const uploadPct = 80 + Math.floor((uploadedCount / processedPayloads.length) * 9);
       if (onProgress) onProgress(uploadPct);
     }
   });
 
-  await withTimeout(Promise.all(uploadTasks), 15000, 'Cloud Storage File Upload');
+  // Await upload tasks naturally to completion without 10s timeouts
+  await Promise.all(uploadTasks);
   console.timeEnd('5. Upload completed');
 
   return { unityUrls, firstGlbUrl };
