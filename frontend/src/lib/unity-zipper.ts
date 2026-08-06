@@ -13,6 +13,9 @@ export interface ExtractedUnityPackage {
   glbUrl?: string;
 }
 
+// Global active blob URL registry to prevent Garbage Collection revocation
+const activeBlobRegistry = new Map<string, Blob>();
+
 export async function processZipClientSide(
   file: File,
   onProgress?: (percent: number) => void
@@ -24,30 +27,36 @@ export async function processZipClientSide(
   let dataBlobUrl = '';
   let wasmBlobUrl = '';
   let indexHtmlText = '';
-  let indexEntry: JSZip.JSZipObject | null = null;
 
   const entries = Object.values(zip.files);
   let processedCount = 0;
 
   for (const entry of entries) {
     if (entry.dir) continue;
-    const name = entry.name;
+    const name = entry.name.toLowerCase();
 
     if (name.endsWith('index.html')) {
-      indexEntry = entry;
       indexHtmlText = await entry.async('string');
     } else if (name.includes('.loader.js')) {
       const blob = await entry.async('blob');
-      loaderBlobUrl = URL.createObjectURL(new Blob([blob], { type: 'application/javascript' }));
+      const jsBlob = new Blob([blob], { type: 'application/javascript' });
+      loaderBlobUrl = URL.createObjectURL(jsBlob);
+      activeBlobRegistry.set(`loader_${Date.now()}`, jsBlob);
     } else if (name.includes('.framework.js')) {
       const blob = await entry.async('blob');
-      frameworkBlobUrl = URL.createObjectURL(new Blob([blob], { type: 'application/javascript' }));
+      const jsBlob = new Blob([blob], { type: 'application/javascript' });
+      frameworkBlobUrl = URL.createObjectURL(jsBlob);
+      activeBlobRegistry.set(`framework_${Date.now()}`, jsBlob);
     } else if (name.includes('.data')) {
       const blob = await entry.async('blob');
-      dataBlobUrl = URL.createObjectURL(new Blob([blob], { type: 'application/octet-stream' }));
+      const dataBlob = new Blob([blob], { type: 'application/octet-stream' });
+      dataBlobUrl = URL.createObjectURL(dataBlob);
+      activeBlobRegistry.set(`data_${Date.now()}`, dataBlob);
     } else if (name.includes('.wasm')) {
       const blob = await entry.async('blob');
-      wasmBlobUrl = URL.createObjectURL(new Blob([blob], { type: 'application/wasm' }));
+      const wasmBlob = new Blob([blob], { type: 'application/wasm' });
+      wasmBlobUrl = URL.createObjectURL(wasmBlob);
+      activeBlobRegistry.set(`wasm_${Date.now()}`, wasmBlob);
     }
 
     processedCount++;
@@ -56,25 +65,41 @@ export async function processZipClientSide(
     }
   }
 
-  // If index.html exists, rewrite script & file references to Blob URLs
+  // Rewrite index.html file paths to active Blob URLs
   let indexBlobUrl = '';
   if (indexHtmlText) {
     let modifiedHtml = indexHtmlText;
+
+    // Inject override script at top of <head>
+    const overrideScript = `
+      <script>
+        window.UNITY_LOADER_URL = "${loaderBlobUrl}";
+        window.UNITY_FRAMEWORK_URL = "${frameworkBlobUrl}";
+        window.UNITY_DATA_URL = "${dataBlobUrl}";
+        window.UNITY_WASM_URL = "${wasmBlobUrl}";
+      </script>
+    `;
+
+    modifiedHtml = modifiedHtml.replace('<head>', `<head>${overrideScript}`);
+
+    // Replace Unity standard buildUrl / loaderUrl / config definitions
     if (loaderBlobUrl) {
+      modifiedHtml = modifiedHtml.replace(/script\.src\s*=\s*[^;]+/g, `script.src = "${loaderBlobUrl}"`);
       modifiedHtml = modifiedHtml.replace(/src="[^"]*\.loader\.js"/g, `src="${loaderBlobUrl}"`);
     }
     if (frameworkBlobUrl) {
-      modifiedHtml = modifiedHtml.replace(/frameworkUrl:\s*"[^"]*"/g, `frameworkUrl: "${frameworkBlobUrl}"`);
+      modifiedHtml = modifiedHtml.replace(/frameworkUrl:\s*[^,\n]+/g, `frameworkUrl: "${frameworkBlobUrl}"`);
     }
     if (dataBlobUrl) {
-      modifiedHtml = modifiedHtml.replace(/dataUrl:\s*"[^"]*"/g, `dataUrl: "${dataBlobUrl}"`);
+      modifiedHtml = modifiedHtml.replace(/dataUrl:\s*[^,\n]+/g, `dataUrl: "${dataBlobUrl}"`);
     }
     if (wasmBlobUrl) {
-      modifiedHtml = modifiedHtml.replace(/codeUrl:\s*"[^"]*"/g, `codeUrl: "${wasmBlobUrl}"`);
+      modifiedHtml = modifiedHtml.replace(/codeUrl:\s*[^,\n]+/g, `codeUrl: "${wasmBlobUrl}"`);
     }
 
     const htmlBlob = new Blob([modifiedHtml], { type: 'text/html' });
     indexBlobUrl = URL.createObjectURL(htmlBlob);
+    activeBlobRegistry.set(`index_${Date.now()}`, htmlBlob);
   }
 
   return {

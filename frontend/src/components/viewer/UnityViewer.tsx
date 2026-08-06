@@ -33,6 +33,7 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
     if (useIframeMode) return;
     if (!canvasRef.current || !urls?.loader) return;
 
+    console.log('[UnityViewer] Initializing direct canvas execution with loader:', urls.loader);
     let progressTimer: NodeJS.Timeout | null = null;
 
     loadUnityInstance(canvasRef.current, {
@@ -57,7 +58,7 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
         setLoading(false);
       })
       .catch((err) => {
-        setLoadError(err?.message || 'Failed to load Unity WebGL files');
+        setLoadError(err?.message || 'Failed to load Unity WebGL WASM files');
         setLoading(false);
       });
 
@@ -110,6 +111,7 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
     }
   };
 
+  // Render indexUrl iframe mode with fallback button
   if (useIframeMode && urls?.indexUrl) {
     return (
       <div ref={containerRef} className="relative w-full h-full min-h-[500px] bg-slate-950 rounded-2xl overflow-hidden border border-border/60 shadow-vr">
@@ -118,7 +120,14 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
           className="w-full h-full min-h-[500px] border-0"
           allow="autoplay; fullscreen; vr; xr-spatial-tracking"
           title={projectTitle || 'Unity WebGL Build'}
+          onError={() => setUseIframeMode(false)}
         />
+        <button
+          onClick={() => setUseIframeMode(false)}
+          className="absolute top-4 right-4 z-30 px-3.5 py-2 bg-slate-900/90 hover:bg-slate-800 text-xs font-bold text-white rounded-xl border border-white/20 shadow-lg flex items-center gap-1.5 transition"
+        >
+          <Layout className="w-3.5 h-3.5 text-cyan-400" /> Switch to Canvas Mode
+        </button>
       </div>
     );
   }
