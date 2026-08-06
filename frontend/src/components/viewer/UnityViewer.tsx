@@ -22,7 +22,10 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
   const [xrStatus, setXrStatus] = useState<DeviceXRMatrix | null>(null);
   const [unityInstance, setUnityInstance] = useState<any>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [useIframeMode, setUseIframeMode] = useState<boolean>(!!urls?.indexUrl);
+  
+  // Only use iframe mode if indexUrl is a valid http/https URL or an active Blob
+  const isHttpIndex = !!urls?.indexUrl && (urls.indexUrl.startsWith('http://') || urls.indexUrl.startsWith('https://'));
+  const [useIframeMode, setUseIframeMode] = useState<boolean>(isHttpIndex);
   const { setIsPresenting } = useVRStore();
 
   useEffect(() => {
@@ -31,9 +34,16 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
 
   useEffect(() => {
     if (useIframeMode) return;
-    if (!canvasRef.current || !urls?.loader) return;
+    if (!canvasRef.current || !urls?.loader) {
+      if (!urls?.loader) {
+        setLoadError('Unity WebGL build loader URL is missing or corrupted.');
+        setLoading(false);
+      }
+      return;
+    }
 
-    console.log('[UnityViewer] Initializing direct canvas execution with loader:', urls.loader);
+    console.log('[UnityViewer] Initializing direct WebGL WASM canvas execution:', urls);
+    setLoading(true);
     let progressTimer: NodeJS.Timeout | null = null;
 
     loadUnityInstance(canvasRef.current, {
@@ -48,7 +58,7 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
           progressTimer = setTimeout(() => {
             setProgress(100);
             setLoading(false);
-          }, 1500);
+          }, 1200);
         }
       },
     })
@@ -58,7 +68,7 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
         setLoading(false);
       })
       .catch((err) => {
-        setLoadError(err?.message || 'Failed to load Unity WebGL WASM files');
+        setLoadError(err?.message || 'Failed to load Unity WebGL WASM binaries');
         setLoading(false);
       });
 
@@ -111,7 +121,7 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
     }
   };
 
-  // Render indexUrl iframe mode with fallback button
+  // Render HTTP indexUrl iframe mode if valid
   if (useIframeMode && urls?.indexUrl) {
     return (
       <div ref={containerRef} className="relative w-full h-full min-h-[500px] bg-slate-950 rounded-2xl overflow-hidden border border-border/60 shadow-vr">
@@ -122,12 +132,14 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
           title={projectTitle || 'Unity WebGL Build'}
           onError={() => setUseIframeMode(false)}
         />
-        <button
-          onClick={() => setUseIframeMode(false)}
-          className="absolute top-4 right-4 z-30 px-3.5 py-2 bg-slate-900/90 hover:bg-slate-800 text-xs font-bold text-white rounded-xl border border-white/20 shadow-lg flex items-center gap-1.5 transition"
-        >
-          <Layout className="w-3.5 h-3.5 text-cyan-400" /> Switch to Canvas Mode
-        </button>
+        {urls?.loader && (
+          <button
+            onClick={() => setUseIframeMode(false)}
+            className="absolute top-4 right-4 z-30 px-3.5 py-2 bg-slate-900/90 hover:bg-slate-800 text-xs font-bold text-white rounded-xl border border-white/20 shadow-lg flex items-center gap-1.5 transition"
+          >
+            <Layout className="w-3.5 h-3.5 text-cyan-400" /> Switch to Canvas Mode
+          </button>
+        )}
       </div>
     );
   }
@@ -139,6 +151,7 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
     >
       <canvas ref={canvasRef} className="w-full h-full object-cover" tabIndex={0} />
 
+      {/* GPU WASM Streaming Loading Screen */}
       {loading && !loadError && (
         <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-md flex flex-col items-center justify-center p-8 z-30 space-y-4">
           <div className="w-16 h-16 rounded-2xl bg-primary/20 border border-primary/40 flex items-center justify-center animate-bounce text-primary">
@@ -158,6 +171,7 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
         </div>
       )}
 
+      {/* Load Error Report */}
       {loadError && (
         <div className="absolute inset-0 bg-slate-950/95 flex flex-col items-center justify-center p-8 text-center z-30 space-y-3">
           <AlertCircle className="w-12 h-12 text-red-400 animate-pulse mx-auto" />
@@ -165,9 +179,18 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
           <p className="text-xs text-red-300 max-w-md font-mono bg-red-950/60 p-4 rounded-xl border border-red-800/40">
             {loadError}
           </p>
+          {urls?.indexUrl && !useIframeMode && (
+            <button
+              onClick={() => setUseIframeMode(true)}
+              className="px-4 py-2 bg-primary text-white text-xs font-bold rounded-xl mt-2 flex items-center gap-2"
+            >
+              <Layout className="w-4 h-4" /> Try Creator index.html View
+            </button>
+          )}
         </div>
       )}
 
+      {/* Action Overlay Panel: ▶ Play & 🥽 Enter VR Mode */}
       {!loading && !isPlaying && !loadError && (
         <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-md flex flex-col items-center justify-center gap-5 z-20 p-6">
           <div className="text-center space-y-2">
@@ -208,6 +231,19 @@ export function UnityViewer({ urls, projectTitle }: UnityViewerProps) {
               </span>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Control Bar in Play Mode */}
+      {isPlaying && (
+        <div className="absolute top-4 right-4 z-20 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center gap-2">
+          <button
+            onClick={handleToggleFullscreen}
+            className="p-2.5 bg-slate-900/80 hover:bg-slate-800 backdrop-blur-md text-white rounded-xl border border-white/10 shadow-lg"
+            title="Fullscreen Mode"
+          >
+            <Maximize2 className="w-5 h-5" />
+          </button>
         </div>
       )}
     </div>
