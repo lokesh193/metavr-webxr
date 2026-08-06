@@ -15,13 +15,13 @@ export function useUpload() {
       const file = files[0];
       const ext = file.name.split('.').pop()?.toLowerCase();
 
-      // Extract ZIP client-side in memory for WebGL execution
+      // Extract ZIP client-side in memory and save to IndexedDB
       if (ext === 'zip' || ext === 'unitypackage' || file.size > 4 * 1024 * 1024) {
         if (ext === 'zip' || ext === 'unitypackage') {
-          toast.info('Extracting Unity WebGL WASM build directly in browser engine...');
+          toast.info('Extracting Unity WebGL WASM build & indexing binaries...');
           const extracted = await processZipClientSide(file, (pct) => setProgress(pct));
 
-          const projectId = `proj_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+          const projectId = extracted.projectId;
           const newProject = {
             id: projectId,
             title: title || extracted.title || file.name,
@@ -40,7 +40,7 @@ export function useUpload() {
             },
           };
 
-          // Store in localStorage & sessionStorage for persistent cross-tab viewing
+          // Store project record in localStorage & sessionStorage
           if (typeof window !== 'undefined') {
             const existing = JSON.parse(localStorage.getItem('custom_projects') || sessionStorage.getItem('custom_projects') || '[]');
             existing.unshift(newProject);
@@ -48,7 +48,7 @@ export function useUpload() {
             sessionStorage.setItem('custom_projects', JSON.stringify(existing));
           }
 
-          toast.success('Unity WebGL WASM build extracted and launched successfully!');
+          toast.success('Unity WebGL WASM build extracted & indexed successfully!');
           return { projectId, data: newProject };
         }
       }

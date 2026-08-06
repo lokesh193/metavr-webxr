@@ -9,6 +9,7 @@ import { VRButton } from '@/components/webxr/VRButton';
 import { ModelViewer } from '@/components/viewer/ModelViewer';
 import { UnityViewer } from '@/components/viewer/UnityViewer';
 import { ProjectCardMenu } from '@/components/ui/ProjectCardMenu';
+import { restoreUrlsFromIndexedDB } from '@/lib/unity-zipper';
 import { Heart, Eye, MessageSquare, Send, Sparkles, Shield, RotateCw, Layers } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -34,21 +35,34 @@ export default function ProjectDetailPage() {
   const fetchProjectDetail = async () => {
     setLoading(true);
     try {
-      // Check client-extracted custom projects in localStorage & sessionStorage first
+      // 1. Attempt to restore fresh active Blob URLs from IndexedDB
+      const restoredUrls = await restoreUrlsFromIndexedDB(projectId);
+
+      // 2. Check client custom projects record in localStorage & sessionStorage
       if (typeof window !== 'undefined') {
         const storedLocal = JSON.parse(localStorage.getItem('custom_projects') || '[]');
         const storedSession = JSON.parse(sessionStorage.getItem('custom_projects') || '[]');
         const combined = [...storedLocal, ...storedSession];
         const found = combined.find((p: any) => p.id === projectId);
+
         if (found) {
-          setProject(found);
+          const finalProject = {
+            ...found,
+            unityUrls: restoredUrls || found.unityUrls,
+          };
+          setProject(finalProject);
           setLoading(false);
           return;
         }
       }
 
       const { data } = await apiClient.get(`/projects/${projectId}`);
-      setProject(data);
+      const finalProject = {
+        ...data,
+        unityUrls: restoredUrls || data.unityUrls,
+      };
+
+      setProject(finalProject);
       setIsLiked(!!data.isLiked);
       setLikesCount(data.likesCount || 0);
     } catch (err) {
