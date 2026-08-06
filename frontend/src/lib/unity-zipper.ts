@@ -114,7 +114,10 @@ export async function extractAndUploadUnityZip(
     let targetPath = rawPath;
     let lowerPath = targetPath.toLowerCase();
 
-    // 100% Decompress Brotli (.br) files to uncompressed bytes
+    const originalData = new Uint8Array(fileData);
+    let isBrotliDecompressed = false;
+
+    // Decompress Brotli (.br) files to uncompressed bytes
     if (lowerPath.endsWith('.br')) {
       if (brotli) {
         try {
@@ -122,41 +125,11 @@ export async function extractAndUploadUnityZip(
           fileData = new Uint8Array(decompressed);
           targetPath = targetPath.slice(0, -3); // Strip .br extension
           lowerPath = targetPath.toLowerCase();
+          isBrotliDecompressed = true;
           console.log(`[Upload Stage Decompress Success] ${targetPath} (${fileData.byteLength} bytes)`);
         } catch (brErr: any) {
           console.warn(`[Upload Stage Exception] Brotli decompression fallback notice for ${targetPath}:`, brErr);
         }
-      }
-    } else if (lowerPath.endsWith('.gz') && typeof DecompressionStream !== 'undefined') {
-      try {
-        const ds = new DecompressionStream('gzip');
-        const writer = ds.writable.getWriter();
-        writer.write(fileData as unknown as BufferSource);
-        writer.close();
-        const decompressedArray = await new Response(ds.readable).arrayBuffer();
-        fileData = new Uint8Array(decompressedArray);
-        targetPath = targetPath.slice(0, -3);
-        lowerPath = targetPath.toLowerCase();
-        console.log(`[Upload Stage Decompress Success] Gzip ${targetPath} (${fileData.byteLength} bytes)`);
-      } catch (gzErr: any) {
-        console.warn(`[Upload Stage Exception] Gzip decompression fallback notice for ${targetPath}:`, gzErr);
-      }
-    }
-
-    // Auto-rewrite index.html if it contains references to .br extensions
-    if (lowerPath.endsWith('index.html')) {
-      try {
-        const decoder = new TextDecoder('utf-8');
-        let htmlText = decoder.decode(fileData);
-        // Replace .data.br -> .data, .framework.js.br -> .framework.js, .wasm.br -> .wasm
-        htmlText = htmlText
-          .replace(/\.data\.br/g, '.data')
-          .replace(/\.framework\.js\.br/g, '.framework.js')
-          .replace(/\.wasm\.br/g, '.wasm');
-        fileData = new TextEncoder().encode(htmlText);
-        console.log('[Upload Stage Index Rewriter] Auto-corrected index.html asset references to uncompressed endpoints.');
-      } catch (htmlErr) {
-        console.warn('[Upload Stage Index Rewriter Warning]:', htmlErr);
       }
     }
 
@@ -181,7 +154,15 @@ export async function extractAndUploadUnityZip(
     const fileBlob = new Blob([fileData as unknown as BlobPart], { type: mimeType });
 
     try {
+      // 1. Upload uncompressed version (.wasm, .data, .framework.js)
       const publicUrl = await uploadToSupabaseDirect(cleanPath, fileBlob, mimeType);
+
+      // 2. If it was originally a .br file, also upload original .br path as fallback alias
+      if (isBrotliDecompressed) {
+        const brCleanPath = `${folderPrefix}/${rawPath.replace(/\\/g, '/')}`;
+        const brBlob = new Blob([originalData as unknown as BlobPart], { type: mimeType });
+        await uploadToSupabaseDirect(brCleanPath, brBlob, mimeType);
+      }
 
       if (lowerPath.endsWith('.loader.js')) {
         unityUrls.loader = publicUrl;
