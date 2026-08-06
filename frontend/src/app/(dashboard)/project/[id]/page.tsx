@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Canvas } from '@react-three/fiber';
 import { apiClient } from '@/lib/api-client';
+import { supabase } from '@/lib/supabase-client';
 import { Project } from '@/types';
 import { VRButton } from '@/components/webxr/VRButton';
 import { ModelViewer } from '@/components/viewer/ModelViewer';
@@ -35,12 +36,36 @@ export default function ProjectDetailPage() {
   const fetchProjectDetail = async () => {
     setLoading(true);
     try {
+      // 1. Primary: Direct query from Supabase PostgreSQL Project table
+      const { data: supaProject, error: supaErr } = await supabase
+        .from('Project')
+        .select('*')
+        .eq('id', projectId)
+        .single();
+
+      if (supaProject && !supaErr) {
+        let unityUrls = supaProject.unityUrls;
+        if (typeof unityUrls === 'string') {
+          try {
+            unityUrls = JSON.parse(unityUrls);
+          } catch (e) {}
+        }
+        setProject({
+          ...supaProject,
+          unityUrls,
+        });
+        setLikesCount(supaProject.likesCount || 0);
+        setLoading(false);
+        return;
+      }
+
+      // 2. Secondary fallback: Next.js API route /api/projects/[id]
       const { data } = await apiClient.get(`/projects/${projectId}`);
       setProject(data);
       setIsLiked(!!data.isLiked);
       setLikesCount(data.likesCount || 0);
     } catch (err) {
-      console.error(err);
+      console.error('[ProjectDetailPage] Load error:', err);
       toast.error('Failed to load project detail');
     } finally {
       setLoading(false);
