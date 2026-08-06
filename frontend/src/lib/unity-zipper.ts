@@ -70,7 +70,7 @@ export async function extractAndUploadUnityZip(
     let targetPath = rawPath;
     let lowerPath = targetPath.toLowerCase();
 
-    // Decompress Brotli (.br) files safely out of WASM heap
+    // Decompress Brotli (.br) files safely
     if (lowerPath.endsWith('.br')) {
       if (lowerPath.includes('.data')) {
         console.log(`[Upload Stage 3] Decompressing data.br (${rawPath})...`);
@@ -83,7 +83,6 @@ export async function extractAndUploadUnityZip(
       if (brotli) {
         try {
           const decompressedWasm = brotli.decompress(fileData);
-          // Crucial: Copy out of WASM heap into standard JS ArrayBuffer view to prevent Fetch API locking
           fileData = new Uint8Array(decompressedWasm);
           targetPath = targetPath.slice(0, -3); // Strip .br extension
           lowerPath = targetPath.toLowerCase();
@@ -126,25 +125,39 @@ export async function extractAndUploadUnityZip(
     }
 
     const cleanPath = `${folderPrefix}/${targetPath.replace(/\\/g, '/')}`;
+    const fileName = targetPath.split('/').pop() || 'asset.bin';
 
-    console.log(`[Upload Stage 6] Queue upload for ${cleanPath} (MIME: ${mimeType}, Size: ${fileData.byteLength} bytes)`);
+    // Slice array view into clean ArrayBuffer to guarantee proper File construction
+    const cleanArrayBuffer = fileData.buffer.slice(
+      fileData.byteOffset,
+      fileData.byteOffset + fileData.byteLength
+    ) as ArrayBuffer;
 
-    // Convert Uint8Array to Blob to guarantee clean HTTP stream transmission
-    const fileBlob = new Blob([fileData.buffer as ArrayBuffer], { type: mimeType });
+    const fileObject = new File([cleanArrayBuffer], fileName, { type: mimeType });
+
+    console.log(`[Upload Stage 6] Queue upload for ${cleanPath}`);
+    console.log(`[Upload Diagnostics] Object Constructor: ${fileObject.constructor.name}, Size: ${fileObject.size} bytes, MIME: ${fileObject.type}`);
 
     try {
       console.log(`[Upload Stage 7] Uploading file ${cleanPath}...`);
-      const { data: uploadData, error: uploadErr } = await supabase.storage
-        .from('webxr-assets')
-        .upload(cleanPath, fileBlob, {
-          upsert: true,
-          contentType: mimeType,
-        });
+      console.time(`supabase upload: ${cleanPath}`);
+
+      const uploadPromise = supabase.storage.from('webxr-assets').upload(cleanPath, fileObject, {
+        upsert: true,
+        contentType: mimeType,
+      });
+
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`Upload timeout after 30 seconds for ${cleanPath}`)), 30000)
+      );
+
+      const { data: uploadData, error: uploadErr }: any = await Promise.race([uploadPromise, timeoutPromise]);
+      console.timeEnd(`supabase upload: ${cleanPath}`);
 
       if (uploadErr) {
         console.error(`[Upload Stage Exception] Supabase upload failed for ${cleanPath}:`, uploadErr.message);
       } else {
-        console.log(`[Upload Stage 8] Upload complete for ${cleanPath}`);
+        console.log(`[Upload Stage 8] Upload complete for ${cleanPath}:`, uploadData);
 
         const { data: urlData } = supabase.storage
           .from('webxr-assets')
@@ -167,7 +180,8 @@ export async function extractAndUploadUnityZip(
         }
       }
     } catch (upEx: any) {
-      console.error(`[Upload Stage Exception] Unexpected exception during upload of ${cleanPath}:`, upEx);
+      console.timeEnd(`supabase upload: ${cleanPath}`);
+      console.error(`[Upload Stage Exception] Unexpected exception/timeout during upload of ${cleanPath}:`, upEx.message || upEx);
     }
 
     processed++;
